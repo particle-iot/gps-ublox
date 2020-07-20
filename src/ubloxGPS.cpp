@@ -74,6 +74,7 @@ ubloxGPS::ubloxGPS(USARTSerial &serial,
 	std::function<bool(bool)> pwr_enable) :
 	serial(&serial),
 	pwr_enable(pwr_enable),
+	tx_ready_queue(nullptr),
 	debugNMEA(false),
 	gpsThread(NULL),
 	lastLockTime(0),
@@ -95,6 +96,7 @@ ubloxGPS::ubloxGPS(SPIClass &spi,
 	pwr_enable(pwr_enable),
 	tx_ready_mcu_pin(tx_ready_mcu_pin),
 	tx_ready_gps_pin(tx_ready_gps_pin),
+	tx_ready_queue(nullptr),
 	debugNMEA(false),
 	gpsThread(NULL),
 	lastLockTime(0),
@@ -216,7 +218,7 @@ void ubloxGPS::setOn(lib_config_t &config)
 
 	if(tx_ready_mcu_pin != PIN_INVALID && tx_ready_gps_pin != PIN_INVALID)
 	{
-		if(!os_queue_create(&tx_ready_queue, sizeof(uint8_t), 1, nullptr))
+		if(!tx_ready_queue && !os_queue_create(&tx_ready_queue, sizeof(uint8_t), 1, nullptr))
 		{
 			pinMode(tx_ready_mcu_pin, INPUT);
 			if(!attachInterrupt(tx_ready_mcu_pin, &ubloxGPS::txReadyHandler, this, FALLING))
