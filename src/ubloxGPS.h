@@ -584,7 +584,7 @@ struct ubx_mga_flash_ack_t {
     uint8_t ack; // ubx_mga_flash_ack_type_t
     uint8_t reserved1;
     uint16_t sequence; // of the message for this ACK or 0xFFFF for UBX-MGA-FLASH-STOP
-};
+} __attribute((packed));
 
 struct ubx_mon_ver_t {
     bool    valid;
