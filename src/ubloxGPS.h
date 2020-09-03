@@ -635,6 +635,8 @@ public:
     uint8_t  getFixQuality(void);
     bool     getLock(void);
     uint32_t getLockTime(void);
+    unsigned int getLockDuration(void);
+    bool     isLockStable();
     float    getSpeed(uint8_t unit);
     float    getHeading(void);
     uint32_t getDate(void);
@@ -767,6 +769,7 @@ private:
 
     void setOn(lib_config_t &config);
     void updateGPS(void);
+    void processLockStability();
     void processGPSByte(uint8_t c);
 #define UBX_REQ_FLAGS_EXPECT_ACK 0x01
     bool requestSendUBX(const uint8_t *sentences, uint16_t len);
@@ -799,7 +802,21 @@ private:
     decode_result_t stateHeader(uint8_t chr); 
     decode_result_t stateData(uint8_t chr); 
     decode_result_t stateCrcA(uint8_t chr); 
-    decode_result_t stateCrcB(uint8_t chr); 
+    decode_result_t stateCrcB(uint8_t chr);
+
+    // number of points to look at when determining if locked location is stable
+    static constexpr unsigned int STABILITY_WINDOW_LENGTH = 5;
+    // std deviation in window must be under this percentage of mean to be
+    // classified as stable
+    static constexpr float STABILITY_WINDOW_THRESHOLD = 0.05;
+
+    // track accuracy of previous points to determine if locked location is stable
+    float stabilityWindow[STABILITY_WINDOW_LENGTH];
+    unsigned int stabilityWindowLength;
+    unsigned int stabilityWindowNext;
+    time_t stabilityWindowLastTimestamp;
+    bool isStable;
+    uint32_t startLockUptime;
 };
 
 #endif /* __UBLOXGPS_H */

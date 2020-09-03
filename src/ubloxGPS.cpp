@@ -16,6 +16,7 @@
 #include "Particle.h"
 #include "ubloxGPS.h"
 #include <mutex>
+#include <cmath>
 #include <time.h>
 
 static Logger Loglib("app.gps.ubx");
@@ -79,7 +80,11 @@ ubloxGPS::ubloxGPS(USARTSerial &serial,
 	gpsThread(NULL),
 	lastLockTime(0),
 	gpsStatus(GPS_STATUS_OFF),
-	gpsUnit(0)
+	gpsUnit(0),
+	stabilityWindowLength(0),
+	stabilityWindowNext(0),
+	isStable(false),
+	startLockUptime(0)
 {
 	pwr_enable(false);
 	gps_init(&nmea_gps, nmea_uptime_wrapper);
@@ -101,7 +106,11 @@ ubloxGPS::ubloxGPS(SPIClass &spi,
 	gpsThread(NULL),
 	lastLockTime(0),
 	gpsStatus(GPS_STATUS_OFF),
-	gpsUnit(0)
+	gpsUnit(0),
+	stabilityWindowLength(0),
+	stabilityWindowNext(0),
+	isStable(false),
+	startLockUptime(0)
 {
 	pwr_enable(false);
 	spi_select(false);
@@ -125,6 +134,73 @@ void ubloxGPS::txReadyHandler()
 	// if queue is full than the consumer will already be notified that there
 	// was a tx ready event so doesn't matter if the insert fails
 	os_queue_put(tx_ready_queue, &dummy, 0, nullptr);
+}
+
+bool ubloxGPS::isLockStable()
+{
+	LOCK();
+
+	return getLock() && isStable;
+}
+
+unsigned int ubloxGPS::getLockDuration()
+{
+	LOCK();
+
+	if(!getLock())
+	{
+		return 0;
+	}
+
+    return System.uptime() - startLockUptime;
+}
+
+// MUST BE CALLED WITH GPS LOCK ALREADY HELD
+void ubloxGPS::processLockStability()
+{
+	if(!getLock())
+    {
+		isStable = false;
+		stabilityWindowLength = 0;
+		startLockUptime = 0;
+		return;
+    }
+
+	if(!startLockUptime)
+	{
+		startLockUptime = System.uptime();
+	}
+
+	uint32_t last_timestamp = getTime();
+	if(stabilityWindowLastTimestamp == last_timestamp)
+	{
+		return;
+	}
+	if(stabilityWindowLength < STABILITY_WINDOW_LENGTH)
+	{
+		stabilityWindowLength++;
+	}
+	stabilityWindow[stabilityWindowNext] = getHorizontalAccuracy();
+	stabilityWindowLastTimestamp = last_timestamp;
+	stabilityWindowNext = (stabilityWindowNext + 1) % STABILITY_WINDOW_LENGTH;
+
+	float avg = 0.0;
+	for(unsigned int i=0; i < stabilityWindowLength; i++)
+	{
+		avg += stabilityWindow[i];
+	}
+	avg /= stabilityWindowLength;
+
+	float std_dev = 0.0;
+	for(unsigned int i=0; i < stabilityWindowLength; i++)
+	{
+		float temp = (avg - stabilityWindow[i]);
+		std_dev += temp * temp;
+	}
+	std_dev /= stabilityWindowLength;
+	std_dev = sqrt(std_dev);
+
+	isStable = ((stabilityWindowLength == STABILITY_WINDOW_LENGTH) && (std_dev < (avg * STABILITY_WINDOW_THRESHOLD)));
 }
 
 void ubloxGPS::processGPSByte(uint8_t c)
@@ -159,7 +235,9 @@ void ubloxGPS::processGPSByte(uint8_t c)
 		gpsStatus = GPS_STATUS_FIXING;
 	}
 
-	 last_receive_time = millis();
+	processLockStability();
+
+	last_receive_time = millis();
 }
 
 // gps reading Serial1 thread
