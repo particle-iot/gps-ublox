@@ -201,8 +201,6 @@ void ubloxGPS::processLockStability()
 	std_dev = sqrt(std_dev);
 
 	isStable = ((stabilityWindowLength == STABILITY_WINDOW_LENGTH) && (std_dev < (avg * STABILITY_WINDOW_THRESHOLD)));
-
-	Loglib.info("accuracy %f, std dev of last %d points is %f, stable is %s", getHorizontalAccuracy(), stabilityWindowLength, std_dev, isStable ? "true" : "false");
 }
 
 void ubloxGPS::processGPSByte(uint8_t c)
