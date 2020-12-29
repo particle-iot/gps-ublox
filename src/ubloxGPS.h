@@ -50,6 +50,7 @@ typedef enum {
     UBX_CFG_CFG              = 0x09, // Clear, Save and Load configurations
     UBX_CFG_DAT              = 0x06, // The currently defined Datum
     UBX_CFG_DOSC             = 0x61, // Disciplined oscillator configuration
+    UBX_CFG_ESFALG           = 0x56, // IMU-mount misalignment configuration
     UBX_CFG_DYNSEED          = 0x85, // Programming the dynamic seed for the host
     UBX_CFG_ESRC             = 0x60, // External synchronization source configuration
     UBX_CFG_FIXSEED          = 0x84, // Programming the fixed seed for host
@@ -78,6 +79,7 @@ typedef enum {
     UBX_CFG_TP5              = 0x31, // Time Pulse Parameters
     UBX_CFG_TXSLOT           = 0x53, // TX buffer time slots configuration
     UBX_CFG_USB              = 0x1B, // USB Configuration
+    UBX_ESF_ALG              = 0x14, // IMU alignment information
     UBX_ESF_INS              = 0x15, // Vehicle dynamics information
     UBX_ESF_MEAS             = 0x02, // External Sensor Fusion Measurements
     UBX_ESF_RAW              = 0x03, // Raw sensor measurements
