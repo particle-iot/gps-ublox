@@ -687,6 +687,7 @@ public:
     bool  updateEsfStatus(void);
     bool  updateEsfAlg(void);
     bool  getEsfStatus(ubx_esf_status_t &esf);
+    void  getEsfAlg(ubx_esf_alg_t &algInfo);
     bool  setReset(void);
     bool  resetOdometer(void);
     bool  updateOdometer(void);
@@ -706,6 +707,7 @@ public:
     bool  disablePUBX(void);
 
     bool  set_auto_imu_alignment(bool enable);
+    bool  is_auto_imu_alignment_enable(void);
     bool  is_auto_imu_alignment_ready(void);
 
     bool  createLog(void);
@@ -845,6 +847,7 @@ private:
     unsigned int stabilityWindowNext;
     time_t stabilityWindowLastTimestamp;
     bool isStable;
+    bool enable_auto_imu_alignment = false;
     uint32_t startLockUptime;
 };
 
