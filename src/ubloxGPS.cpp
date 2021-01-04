@@ -1371,7 +1371,7 @@ bool ubloxGPS::set_auto_imu_alignment(bool enable)
 	sentences[3] = 0x00;
 	sentences[4] = (enable ? 1 : 0) << 8;
 	enable_auto_imu_alignment = enable;
-	if(log_enabled) Loglib.info("set to auto IMU alignment %s", enable_auto_imu_alignment ? "enable" : "disable");
+	Log.info("set to auto IMU alignment %s", enable_auto_imu_alignment ? "enable" : "disable");
 	return requestSendUBX(sentences, 15);
 }
 
@@ -1382,7 +1382,15 @@ bool ubloxGPS::is_auto_imu_alignment_enable(void)
 
 bool ubloxGPS::is_auto_imu_alignment_ready(void)
 {
-	return alg_info.flags.autoMntAlgOn == 1 && esf_status.fusionMode == 1;
+	uint8_t ret = alg_info.flags.autoMntAlgOn & esf_status.fusionMode;
+	Log.info("is_auto_imu_alignment_ready: numSens == %d",esf_status.numSens);
+	for (int i = 0; i < esf_status.numSens; i++)
+	{
+		ret &= IS_SENS_STATUS2_CALIBRATED(esf_status.sensStatus2[i]);
+		Log.info("%d. %s",i, IS_SENS_STATUS2_CALIBRATED(esf_status.sensStatus2[i]) ? "calibrated" : "not calibrated");
+	}
+	Log.info("auto imu alignment is %s", ret ? "ready" : "not ready");
+	return ret ? true : false;
 }
 
 
