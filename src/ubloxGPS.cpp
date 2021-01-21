@@ -21,7 +21,7 @@
 
 static Logger Loglib("app.gps.ubx");
 static Logger nmea_log("app.gps.nmea");
-std::recursive_mutex gps_mutex;
+RecursiveMutex gps_mutex;
 
 /* Parse NMEA item define */
 #define PARSE_NMEA_GPGGA
@@ -43,7 +43,7 @@ std::recursive_mutex gps_mutex;
 
 #define GPS_HEX_LOGGING (0)
 
-#define LOCK()    	std::lock_guard<std::recursive_mutex> __gps_guard(gps_mutex);
+#define LOCK()    	std::lock_guard<RecursiveMutex> __gps_guard(gps_mutex);
 
 static const int MAX_GPS_AGE_MS = 10000; // GPS location must be newer than this to be considered valid
 
