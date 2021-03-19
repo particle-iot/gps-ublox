@@ -673,6 +673,7 @@ public:
     double   getHorizontalAccuracy(void);
     double   getVerticalAccuracy(void);
     float    getDistance(double lat1, double long1, double lat2, double long2);
+    uint32_t get_fusion_status();
 
     /**
      * set new baudrate for ubloxGPS UART port

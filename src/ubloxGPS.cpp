@@ -1405,6 +1405,11 @@ bool ubloxGPS::is_auto_imu_alignment_ready(void)
 	return ret ? true : false;
 }
 
+uint32_t ubloxGPS::get_fusion_status()
+{
+	Log.info("get_fusion_status: fusionMode == %d",esf_status.fusionMode);
+	return esf_status.fusionMode;
+}
 
 bool ubloxGPS::requestSendUBX(const uint8_t *sentences, uint16_t len)
 {
