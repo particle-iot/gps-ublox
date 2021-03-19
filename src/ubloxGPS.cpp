@@ -45,6 +45,9 @@ RecursiveMutex gps_mutex;
 
 #define LOCK()    	std::lock_guard<RecursiveMutex> __gps_guard(gps_mutex);
 
+#define IS_SENS_STATUS2_CALIBRATED(X)						((X & 0x03) >= 0x02 ? 1 : 0)
+#define IS_SENS_STATUS1_USE_FOR_FUSION_SOLUTION(X)			((X >> 6) & 0x01)
+
 static const int MAX_GPS_AGE_MS = 10000; // GPS location must be newer than this to be considered valid
 
 static const uint8_t SYNC_1 = 0xB5;
@@ -1382,12 +1385,21 @@ bool ubloxGPS::is_auto_imu_alignment_enable(void)
 
 bool ubloxGPS::is_auto_imu_alignment_ready(void)
 {
-	uint8_t ret = alg_info.flags.autoMntAlgOn & esf_status.fusionMode;
-	Log.info("is_auto_imu_alignment_ready: numSens == %d",esf_status.numSens);
+	uint8_t ret = alg_info.flags.autoMntAlgOn & (esf_status.fusionMode == 1 ? 1 : 0);
+	Log.info("is_auto_imu_alignment_ready: numSens == %d , fusionMode == %d",esf_status.numSens,esf_status.fusionMode);
 	for (int i = 0; i < esf_status.numSens; i++)
 	{
+		/*
+		if (IS_SENS_STATUS1_USE_FOR_FUSION_SOLUTION(esf_status.sensStatus1[i]) == 0)
+		{
+			Log.info("%d. sensStatus1 == 0x%02X sensor-%d %s",i,esf_status.sensStatus1[i],i, "not use for fusion solution");
+			continue;
+		}		
 		ret &= IS_SENS_STATUS2_CALIBRATED(esf_status.sensStatus2[i]);
-		Log.info("%d. %s",i, IS_SENS_STATUS2_CALIBRATED(esf_status.sensStatus2[i]) ? "calibrated" : "not calibrated");
+		Log.info("    %s",i, IS_SENS_STATUS2_CALIBRATED(esf_status.sensStatus2[i]) ? "calibrated" : "not calibrated");
+		*/
+		Log.info("%d. sensStatus1 == 0x%02X , sensor%d data is %s for the current sensor fusion solution",i,esf_status.sensStatus1[i],i,IS_SENS_STATUS1_USE_FOR_FUSION_SOLUTION(esf_status.sensStatus1[i]) ? "use" : "not use");
+		Log.info("   %s",IS_SENS_STATUS2_CALIBRATED(esf_status.sensStatus2[i]) ? "calibrated" : "not calibrated");
 	}
 	Log.info("auto imu alignment is %s", ret ? "ready" : "not ready");
 	return ret ? true : false;
