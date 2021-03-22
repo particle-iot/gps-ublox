@@ -352,7 +352,7 @@ void ubloxGPS::setOn(lib_config_t &config)
 	setGNSS(config.support_gnss);
 	setPower((ubx_power_mode_t)config.power_mode);
 	setMode((ubx_dynamic_model_t)config.dynamic_model);
-	set_auto_imu_alignment(true);
+	
     last_receive_time = 0;
 
 	if (!gpsThread) {
@@ -701,10 +701,13 @@ void ubloxGPS::processUBX()
 		alg_info.yaw = ubx_rx_msg.ubx_msg[8] | (ubx_rx_msg.ubx_msg[9] << 8) | (ubx_rx_msg.ubx_msg[10] << 16) | (ubx_rx_msg.ubx_msg[11] << 24);
 		alg_info.pitch = ubx_rx_msg.ubx_msg[12] | (ubx_rx_msg.ubx_msg[13] << 8);
 		alg_info.roll = ubx_rx_msg.ubx_msg[14] | (ubx_rx_msg.ubx_msg[15] << 8);
-		Log.info("[UBX_ESF_ALG]: iTow == %ld", alg_info.iTow);
-		Log.info("version == %d,yaw == %ld,pitch == %d,,roll == %d,", alg_info.version, alg_info.yaw, alg_info.pitch, alg_info.roll);
-		Log.info("flags ==> autoMntAlgOn == %d,status == %d", alg_info.flags.autoMntAlgOn,alg_info.flags.status);
-		Log.info("error ==> titleAlg == %d,angleAlg == %d,yawAlg == %d", alg_info.error.titleAlg,alg_info.error.angleAlg,alg_info.error.yawAlg);
+		Log.info("version == %d,yaw == %.2f,pitch == %.2f,roll == %.2f", alg_info.version, ((float)alg_info.yaw) / 100, ((float)alg_info.pitch) / 100, ((float)alg_info.roll) / 100);
+		if(log_enabled)
+		{
+			Loglib.info("[UBX_ESF_ALG]: iTow == %ld", alg_info.iTow);
+			Loglib.info("flags ==> autoMntAlgOn == %d,status == %d", alg_info.flags.autoMntAlgOn,alg_info.flags.status);
+			Loglib.info("error ==> titleAlg == %d,angleAlg == %d,yawAlg == %d", alg_info.error.titleAlg,alg_info.error.angleAlg,alg_info.error.yawAlg);
+		}
 	}
 }
 
@@ -899,7 +902,6 @@ bool ubloxGPS::updateEsfStatus(void)
 	// invalidate ESF status local storage when forcing a poll request to know when data has updated from decode()
 	esf_status.valid = false;
 	uint8_t sentences[4] = { (uint8_t)UBX_CLASS_ESF, (uint8_t)UBX_ESF_STATUS, 0x00, 0x00 };
-	Log.info("updateEsfStatus....");
 	return requestSendUBX(sentences, 4);
 }
 
@@ -908,7 +910,6 @@ bool ubloxGPS::updateEsfAlg(void)
 	LOCK();
 	// This message outputs the IMU alignment angles which define the rotation from the installation-frame to the IMU-frame
 	uint8_t sentences[4] = { (uint8_t)UBX_CLASS_ESF, (uint8_t)UBX_ESF_ALG, 0x00, 0x00 };
-	Log.info("updateEsfAlg....");
 	return requestSendUBX(sentences, 4);
 }
 
@@ -924,10 +925,13 @@ void ubloxGPS::getEsfAlg(ubx_esf_alg_t &algInfo)
 {
 	LOCK();
 	memcpy(&algInfo, &alg_info, sizeof(ubx_esf_alg_t));
-	Log.info("[getEsfAlg]: iTow == %ld", alg_info.iTow);
-	Log.info("version == %d,yaw == %ld,pitch == %d,,roll == %d,", alg_info.version, alg_info.yaw, alg_info.pitch, alg_info.roll);
-	Log.info("flags ==> autoMntAlgOn == %d,status == %d", alg_info.flags.autoMntAlgOn,alg_info.flags.status);
-	Log.info("error ==> titleAlg == %d,angleAlg == %d,yawAlg == %d", alg_info.error.titleAlg,alg_info.error.angleAlg,alg_info.error.yawAlg);
+	if(log_enabled)
+	{	
+		Loglib.info("[getEsfAlg]: iTow == %ld", alg_info.iTow);
+		Loglib.info("version == %d,yaw == %ld,pitch == %d,,roll == %d,", alg_info.version, alg_info.yaw, alg_info.pitch, alg_info.roll);
+		Loglib.info("flags ==> autoMntAlgOn == %d,status == %d", alg_info.flags.autoMntAlgOn,alg_info.flags.status);
+		Loglib.info("error ==> titleAlg == %d,angleAlg == %d,yawAlg == %d", alg_info.error.titleAlg,alg_info.error.angleAlg,alg_info.error.yawAlg);
+	}
 }
 
 bool ubloxGPS::setReset(void)
@@ -1374,7 +1378,8 @@ bool ubloxGPS::set_auto_imu_alignment(bool enable)
 	sentences[3] = 0x00;
 	sentences[4] = (enable ? 1 : 0) << 8;
 	enable_auto_imu_alignment = enable;
-	Log.info("set to auto IMU alignment %s", enable_auto_imu_alignment ? "enable" : "disable");
+	memset(&alg_info,0,sizeof(ubx_esf_alg_t));
+	Log.info("set auto IMU alignment %s", enable_auto_imu_alignment ? "enable" : "disable");
 	return requestSendUBX(sentences, 15);
 }
 
@@ -1386,28 +1391,23 @@ bool ubloxGPS::is_auto_imu_alignment_enable(void)
 bool ubloxGPS::is_auto_imu_alignment_ready(void)
 {
 	uint8_t ret = alg_info.flags.autoMntAlgOn & (esf_status.fusionMode == 1 ? 1 : 0);
-	Log.info("is_auto_imu_alignment_ready: numSens == %d , fusionMode == %d",esf_status.numSens,esf_status.fusionMode);
-	for (int i = 0; i < esf_status.numSens; i++)
+	if(log_enabled)
 	{
+		Loglib.info("is_auto_imu_alignment_ready: numSens == %d , fusionMode == %d",esf_status.numSens,esf_status.fusionMode);
 		/*
-		if (IS_SENS_STATUS1_USE_FOR_FUSION_SOLUTION(esf_status.sensStatus1[i]) == 0)
+		for (int i = 0; i < esf_status.numSens; i++)
 		{
-			Log.info("%d. sensStatus1 == 0x%02X sensor-%d %s",i,esf_status.sensStatus1[i],i, "not use for fusion solution");
-			continue;
-		}		
-		ret &= IS_SENS_STATUS2_CALIBRATED(esf_status.sensStatus2[i]);
-		Log.info("    %s",i, IS_SENS_STATUS2_CALIBRATED(esf_status.sensStatus2[i]) ? "calibrated" : "not calibrated");
+			Log.info("%d. sensStatus1 == 0x%02X , sensor%d data is %s for the current sensor fusion solution",i,esf_status.sensStatus1[i],i,IS_SENS_STATUS1_USE_FOR_FUSION_SOLUTION(esf_status.sensStatus1[i]) ? "use" : "not use");
+			Log.info("   %s",IS_SENS_STATUS2_CALIBRATED(esf_status.sensStatus2[i]) ? "calibrated" : "not calibrated");
+		}
 		*/
-		Log.info("%d. sensStatus1 == 0x%02X , sensor%d data is %s for the current sensor fusion solution",i,esf_status.sensStatus1[i],i,IS_SENS_STATUS1_USE_FOR_FUSION_SOLUTION(esf_status.sensStatus1[i]) ? "use" : "not use");
-		Log.info("   %s",IS_SENS_STATUS2_CALIBRATED(esf_status.sensStatus2[i]) ? "calibrated" : "not calibrated");
+		Log.info("auto imu alignment is %s", ret ? "ready" : "not ready");
 	}
-	Log.info("auto imu alignment is %s", ret ? "ready" : "not ready");
 	return ret ? true : false;
 }
 
 uint32_t ubloxGPS::get_fusion_status()
 {
-	Log.info("get_fusion_status: fusionMode == %d",esf_status.fusionMode);
 	return esf_status.fusionMode;
 }
 
