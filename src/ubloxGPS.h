@@ -710,6 +710,9 @@ public:
     bool  set_auto_imu_alignment(bool enable);
     bool  is_auto_imu_alignment_enable(void);
     bool  is_auto_imu_alignment_ready(void);
+    bool  is_saving_auto_imu_aligment(void);
+    bool  start_save_auto_imu_aligment(void);
+    bool  save_auto_imu_aligment(void);
 
     bool  createLog(void);
     bool  eraseLog(void);
@@ -849,6 +852,7 @@ private:
     time_t stabilityWindowLastTimestamp;
     bool isStable;
     bool enable_auto_imu_alignment = false;
+    bool saveing_auto_imu_alignment = false;
     uint32_t startLockUptime;
 };
 

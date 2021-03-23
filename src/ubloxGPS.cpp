@@ -1383,9 +1383,53 @@ bool ubloxGPS::set_auto_imu_alignment(bool enable)
 	return requestSendUBX(sentences, 15);
 }
 
+bool ubloxGPS::start_save_auto_imu_aligment(void)
+{
+	if (is_auto_imu_alignment_ready())
+	{
+		saveing_auto_imu_alignment = true;
+		set_auto_imu_alignment(false);
+	}	
+	return false;
+}
+
+bool ubloxGPS::save_auto_imu_aligment(void)
+{
+	LOCK();
+	uint8_t sentences[16] = {0x00};
+	sentences[0] = (uint8_t)UBX_CLASS_CFG;
+	sentences[1] = (uint8_t)UBX_CFG_CFG;
+	sentences[2] = 0x0D;
+	//clearMask
+	sentences[3] = 0x00;
+	sentences[4] = 0x00;
+	sentences[5] = 0x00;
+	sentences[6] = 0x00;
+	//saveMask
+	sentences[7] = 0xFF;
+	sentences[8] = 0xFF;
+	sentences[9] = 0xFF;
+	sentences[10] = 0xFF;
+	//loadMask
+	sentences[11] = 0xFF;
+	sentences[12] = 0xFF;
+	sentences[13] = 0xFF;
+	sentences[14] = 0xFF;	
+	//deviceMask
+	sentences[15] = 0x03;
+
+	return requestSendUBX(sentences, sizeof(sentences));	
+}
+
+
 bool ubloxGPS::is_auto_imu_alignment_enable(void)
 {
 	return enable_auto_imu_alignment;
+}
+
+bool ubloxGPS::is_saving_auto_imu_aligment(void)
+{
+	return saveing_auto_imu_alignment;
 }
 
 bool ubloxGPS::is_auto_imu_alignment_ready(void)
