@@ -1379,6 +1379,7 @@ bool ubloxGPS::set_auto_imu_alignment(bool enable)
 	sentences[4] = (enable ? 1 : 0) << 8;
 	enable_auto_imu_alignment = enable;
 	memset(&alg_info,0,sizeof(ubx_esf_alg_t));
+	saveing_auto_imu_alignment = false;
 	Log.info("set auto IMU alignment %s", enable_auto_imu_alignment ? "enable" : "disable");
 	return requestSendUBX(sentences, 15);
 }
@@ -1418,6 +1419,9 @@ bool ubloxGPS::save_auto_imu_aligment(void)
 	//deviceMask
 	sentences[15] = 0x03;
 
+	Log.info("save_auto_imu_aligment !");
+
+	saveing_auto_imu_alignment = false;
 	return requestSendUBX(sentences, sizeof(sentences));	
 }
 
