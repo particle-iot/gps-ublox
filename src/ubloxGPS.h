@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Particle Industries, Inc. 
+ * Copyright (c) 2020 Particle Industries, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -78,6 +78,9 @@ typedef enum {
     UBX_CFG_TP5              = 0x31, // Time Pulse Parameters
     UBX_CFG_TXSLOT           = 0x53, // TX buffer time slots configuration
     UBX_CFG_USB              = 0x1B, // USB Configuration
+    UBX_CFG_ESFALG           = 0x56, // Accelerometer sensor misalignment configuration
+    UBX_CFG_ESFA             = 0x4C, // Accelerometer sensor configuration
+    UBX_CFG_ESFLA            = 0x2F, // Lever-arm configuration
     UBX_ESF_INS              = 0x15, // Vehicle dynamics information
     UBX_ESF_MEAS             = 0x02, // External Sensor Fusion Measurements
     UBX_ESF_RAW              = 0x03, // Raw sensor measurements
@@ -118,7 +121,7 @@ typedef enum {
     UBX_NAV_TIMELS           = 0x26, // Leap second event information
     UBX_NAV_VELECEF          = 0x11, // Velocity Solution in ECEF
     UBX_NAV_TIMEUTC          = 0x21, // UTC Time Solution
-    UBX_NAV_VELNED           = 0x12, // Velocity Solution in NED    
+    UBX_NAV_VELNED           = 0x12, // Velocity Solution in NED
     UBX_PUBX_CONFIG          = 0x41, // Set protocols and baudrate
     UBX_PUBX_POSITION        = 0x00, // Lat/Long Position Data
     UBX_PUBX_RATE            = 0x40, // Set NMEA message output rate
@@ -212,7 +215,8 @@ typedef enum {
     UBX_DYNAMIC_MODEL_AIRBORNE_1G  = 6,
     UBX_DYNAMIC_MODEL_AIRBORNE_2G  = 7,
     UBX_DYNAMIC_MODEL_AIRBORNE_4G  = 8,
-    UBX_DYNAMIC_MODEL_WRIST        = 9
+    UBX_DYNAMIC_MODEL_WRIST        = 9,
+    UBX_DYNAMIC_MODEL_BIKE         = 10,
 } ubx_dynamic_model_t;
 
 typedef enum {
@@ -240,10 +244,10 @@ typedef enum {
 } gps_speed_unit_t;
 
 enum {
-	HEADER_CLASS_OFFSET = 0,
-	HEADER_MSG_ID_OFFSET, // 1
-	HEADER_LENGTH_LSB_OFFSET, // 2
-	HEADER_LENGTH_MSB_OFFSET // 3
+    HEADER_CLASS_OFFSET = 0,
+    HEADER_MSG_ID_OFFSET, // 1
+    HEADER_LENGTH_LSB_OFFSET, // 2
+    HEADER_LENGTH_MSB_OFFSET // 3
 };
 
 struct ubx_geofence_t {
@@ -305,7 +309,7 @@ struct ubx_msg_header_t {
 
 // Includes fixed storage, intended for internal use when accumulating a new
 // RX frame. crc_a and crc_b are updated as the message is received so there
-// is no function to calculate it. 
+// is no function to calculate it.
 struct ubx_rx_msg_t {
     uint8_t         msg_class;
     uint8_t         msg_id;
@@ -327,7 +331,7 @@ struct ubx_rx_msg_t {
         crc_a = crc_b = 0;
     }
 
-    
+
 } __attribute__((packed)) ;
 
 struct ubx_msg_t {
@@ -593,28 +597,75 @@ struct ubx_mon_ver_t {
     uint8_t *extension;
 };
 
+constexpr ubx_dynamic_model_t UBX_DEFAULT_MODEL = UBX_DYNAMIC_MODEL_PORTABLE;
+
 class ubloxGPS
 {
 
 public:
+    /**
+     * @brief Construct a new ubloxGPS object via serial bus
+     *
+     * @param serial Reference to particular serial interface
+     * @param pwr_enable Callback function to control power pin
+     */
     ubloxGPS(USARTSerial &serial,
         std::function<bool(bool)> pwr_enable);
+
+    /**
+     * @brief Construct a new ubloxGPS object
+     *
+     * @param spi Reference to particular SPI interface
+     * @param spi_select Callback function to control SPI chip select
+     * @param pwr_enable Callback function to control power pin
+     * @param tx_ready_mcu_pin Interrupt pin used on local MCU
+     * @param tx_ready_gps_pin Interrupt pin used on the module MCU
+     */
     ubloxGPS(SPIClass &spi,
         std::function<bool(bool)> spi_select,
         std::function<bool(bool)> pwr_enable,
         int tx_ready_mcu_pin = PIN_INVALID,
         int tx_ready_gps_pin = PIN_INVALID);
+
     gps_t nmea_gps;
 
-    // Acquires the gps lock, useful for multiple gps operations at a time
+    /**
+     * @brief Acquires the gps lock, useful for multiple gps operations at a time
+     *
+     */
     void lock();
-    // Releases the gps lock
+
+    /**
+     * @brief Releases the gps lock
+     *
+     */
     void unlock();
-    // interrupt handler for tx ready signal from gps (if enabled)
+
+    /**
+     * @brief Interrupt handler for tx ready signal from gps (if enabled)
+     *
+     */
     void txReadyHandler();
 
-    void on(void);
+    /**
+     * @brief Power the GNSS module on and optionally configure the dynamic model
+     *
+     * @param model Dynamic model for dead reckoning configuration
+     */
+    void on(ubx_dynamic_model_t model = UBX_DEFAULT_MODEL);
+
+    /**
+     * @brief Power the GNSS module off
+     *
+     */
     void off(void);
+
+    /**
+     * @brief Indicate whether the GNSS module is active and sending NMEA/UBX data
+     *
+     * @return true Is active
+     * @return false Is not active
+     */
     bool is_active(void);
 
     void enable_log(bool en)
@@ -631,27 +682,74 @@ public:
 
     double   getLatitude(void);
     double   getLongitude(void);
+
+    /**
+     * @brief Get the mean sea level altitude
+     *
+     * @return float Altitude in meters
+     */
     float    getAltitude(void);
+
     uint8_t  getFixQuality(void);
     bool     getLock(void);
     uint32_t getLockTime(void);
     unsigned int getLockDuration(void);
     bool     isLockStable();
+
+    /**
+     * @brief Get the measured speed in the given units
+     *
+     * @param unit One of { GPS_SPEED_UNIT_MPS, GPS_SPEED_UNIT_MPH, GPS_SPEED_UNIT_KMPH }
+     * @return float Speed in the specified units
+     */
     float    getSpeed(uint8_t unit);
+
+    /**
+     * @brief Get the measured heading
+     *
+     * @return float Heading in degrees where 0 deg is North, 90 deg is East, 180 deg is South, and 270 deg is West
+     */
     float    getHeading(void);
+
     uint32_t getDate(void);
     uint32_t getTime(void);
     uint32_t getUTCTime();
     uint8_t  getSatellites(void);
-    int8_t   getGeoIdHeight(void);
-    uint8_t  getHDOP(void);
+
+    /**
+     * @brief Get the geoid height
+     *
+     * @return double Geoid height in meters
+     */
+    double   getGeoIdHeight(void);
+
+    /**
+     * @brief Get the horizontal dilution of precision
+     *
+     * @return double HDOP value in meters
+     */
+    double   getHDOP(void);
+
     uint8_t  getSignalStrength(void);
+
+    /**
+     * @brief Get the horizontal accuracy
+     *
+     * @return double Horizontal accuracy in meters
+     */
     double   getHorizontalAccuracy(void);
+
+    /**
+     * @brief Get the vertical accuracy
+     *
+     * @return double Vertical accuracy in meters
+     */
     double   getVerticalAccuracy(void);
+
     float    getDistance(double lat1, double long1, double lat2, double long2);
 
     /**
-     * set new baudrate for ubloxGPS UART port
+     * @brief Set new baudrate for ubloxGPS UART port
      *
      * NOTE: please pay attention that set baudrate can't get ACK/NAK
      *       so it's better to test the NMEA output by log print after
@@ -670,6 +768,24 @@ public:
     bool  getVersion(String& swVersion, String& hwVersion, String& extVersion);
     bool  setGNSS(uint8_t gnssMask);
     bool  setMode(ubx_dynamic_model_t dynModel);
+
+    /**
+     * @brief Get the dynamic model response after the request has been sent with updateMode()
+     *
+     * @param dynModel
+     * @return true
+     * @return false
+     */
+    bool  getMode(ubx_dynamic_model_t& dynModel);
+
+    /**
+     * @brief Request for dynamic model data from module to be sent
+     *
+     * @return true Request was sent successfully
+     * @return false Request failed to be sent
+     */
+    bool  updateMode();
+
     bool  setPower(ubx_power_mode_t power_mode);
     bool  setPower(ubx_power_mode_t power_mode, uint16_t period, uint16_t onTime);
     bool  setGeofence(ubx_geofence_t geofence);
@@ -702,7 +818,7 @@ public:
     void hex_dump(LogLevel level, uint8_t *data, int len, Logger *logger=NULL);
 protected:
     bool checkWaitingForAckOrRspFlags() const;
-    
+
 private:
     SPIClass *spi = NULL;
     __SPISettings spi_settings;
@@ -720,13 +836,14 @@ private:
 
     bool write_mga_active = false;
     uint16_t write_mga_sequence = 0;
-    
+
     uint8_t gpsStatus;
     uint8_t gpsUnit;
     uint32_t last_receive_time = 0;
     ubx_esf_status_t esf_status = {0};
     ubx_nav_odo_t    nav_odo = {0};
     ubx_mon_ver_t    mon_ver = {0};
+    ubx_dynamic_model_t cfg_dyn_model = UBX_DEFAULT_MODEL; // Model read from device
 
     bool  ackExpected;
     bool  rspExpected;
@@ -746,11 +863,11 @@ private:
 
     typedef struct {
         bool     output_pubx = true;        // true - output PUBX,  false - output NMEA
-        uint8_t  power_enable = HIGH;       // pin state when GPS power on 
+        uint8_t  power_enable = HIGH;       // pin state when GPS power on
         uint8_t  power_mode = UBX_POWER_MODE_FULL_POWER;
-        uint8_t  dynamic_model = UBX_DYNAMIC_MODEL_AUTOMOTIVE;
-        uint8_t  support_gnss = UBX_GNSS_TYPE_GPS | UBX_GNSS_TYPE_BeiDou | UBX_GNSS_TYPE_GLONASS;
-        uint32_t baudrate = UBX_BAUDRATE_115200; 
+        uint8_t  dynamic_model = UBX_DEFAULT_MODEL;
+        uint8_t  support_gnss = UBX_GNSS_TYPE_GPS | UBX_GNSS_TYPE_BeiDou | UBX_GNSS_TYPE_GLONASS | UBX_GNSS_TYPE_SBAS | UBX_GNSSID_QZSS | UBX_GNSSID_Galileo | UBX_GNSSID_IMES;
+        uint32_t baudrate = UBX_BAUDRATE_115200;
         uint32_t fastIntervalSec = 1;       // fast interval for output position message
         uint32_t slowIntervalSec = 30;      // slow interval for output satellite message
 
@@ -758,9 +875,9 @@ private:
             output_pubx = true;
             power_enable = HIGH;
             power_mode = UBX_POWER_MODE_FULL_POWER;
-            dynamic_model = UBX_DYNAMIC_MODEL_AUTOMOTIVE;
-            support_gnss = UBX_GNSS_TYPE_GPS | UBX_GNSS_TYPE_BeiDou | UBX_GNSS_TYPE_GLONASS;
-            baudrate = UBX_BAUDRATE_115200; 
+            dynamic_model = UBX_DEFAULT_MODEL;
+            support_gnss = UBX_GNSS_TYPE_GPS | UBX_GNSS_TYPE_BeiDou | UBX_GNSS_TYPE_GLONASS | UBX_GNSS_TYPE_SBAS | UBX_GNSSID_QZSS | UBX_GNSSID_Galileo | UBX_GNSSID_IMES;
+            baudrate = UBX_BAUDRATE_115200;
             fastIntervalSec = 1;
             slowIntervalSec = 30;
         }
@@ -797,11 +914,11 @@ private:
     bool parseRxMsg();
     std::function<decode_result_t(ubloxGPS *,uint8_t chr)> decodeStateHandler = &ubloxGPS::stateSync1;
     decode_result_t decodeUbx(uint8_t chr);
-    decode_result_t stateSync1(uint8_t chr); 
-    decode_result_t stateSync2(uint8_t chr); 
-    decode_result_t stateHeader(uint8_t chr); 
-    decode_result_t stateData(uint8_t chr); 
-    decode_result_t stateCrcA(uint8_t chr); 
+    decode_result_t stateSync1(uint8_t chr);
+    decode_result_t stateSync2(uint8_t chr);
+    decode_result_t stateHeader(uint8_t chr);
+    decode_result_t stateData(uint8_t chr);
+    decode_result_t stateCrcA(uint8_t chr);
     decode_result_t stateCrcB(uint8_t chr);
 
     // number of points to look at when determining if locked location is stable
