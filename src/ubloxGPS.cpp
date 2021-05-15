@@ -1904,12 +1904,15 @@ bool ubloxGPS::getLogInfo(ubx_log_info_rsp_t *info)
 
 bool ubloxGPS::addLogString(uint8_t *bytes, uint16_t length)
 {
-    struct {
+    union {
         ubx_log_string_t header = {
             UBX_CLASS_LOG,
             UBX_LOG_STRING,
         };
-        char payload[UBX_LOG_STRING_MAX_LEN];
+        struct {
+            uint8_t dummy[sizeof(ubx_log_string_t)];
+            char payload[UBX_LOG_STRING_MAX_LEN];
+        };
     } __attribute__((packed)) msg;
     LOCK();
 
@@ -2022,12 +2025,15 @@ void ubloxGPS::abortWriteMGA()
 // max size is 512 bytes
 ubx_mga_flash_ack_type_t ubloxGPS::writeMGA(uint8_t *bytes, uint16_t length)
 {
-    struct {
+    union {
         ubx_mga_flash_write_t header = {
             UBX_CLASS_MGA,
             UBX_MGA_FLASH_DATA,
         };
-        char payload[UBX_MGA_FLASH_DATA_MAX_LEN];
+        struct {
+            uint8_t dummy[sizeof(ubx_mga_flash_write_t)];
+            char payload[UBX_MGA_FLASH_DATA_MAX_LEN];
+        };
     } __attribute__((packed)) msg;
     const ubx_mga_flash_ack_t *rsp = NULL;
     LOCK();
