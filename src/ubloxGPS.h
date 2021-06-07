@@ -81,6 +81,7 @@ typedef enum {
     UBX_CFG_ESFALG           = 0x56, // Accelerometer sensor misalignment configuration
     UBX_CFG_ESFA             = 0x4C, // Accelerometer sensor configuration
     UBX_CFG_ESFLA            = 0x2F, // Lever-arm configuration
+	UBX_ESF_ALG              = 0x14, // IMU alignment information
     UBX_ESF_INS              = 0x15, // Vehicle dynamics information
     UBX_ESF_MEAS             = 0x02, // External Sensor Fusion Measurements
     UBX_ESF_RAW              = 0x03, // Raw sensor measurements
@@ -340,6 +341,28 @@ struct ubx_msg_t {
     uint8_t         msg_id;
     uint16_t        length;
     uint8_t         payload[];
+} __attribute__((packed));
+
+struct ubx_esf_alg_t {
+    uint32_t iTow;
+    uint8_t version;
+    struct
+    {
+        uint8_t autoMntAlgOn : 1;
+        uint8_t status : 3;
+        uint8_t reserved : 4;
+    }flags;
+    struct
+    {
+        uint8_t titleAlg : 1;
+        uint8_t yawAlg : 1;
+        uint8_t angleAlg : 1;
+        uint8_t reserved : 5;
+    }error;    
+    uint8_t reserved1;
+    uint32_t yaw;
+    int16_t pitch;
+    int16_t roll;
 } __attribute__((packed));
 
 struct ubx_esf_status_t {
@@ -853,7 +876,9 @@ public:
     bool  setAntanna(ubx_antenna_t ant);
     bool  setRate(uint16_t measRateHz);
     bool  updateEsfStatus(void);
+    bool  updateEsfAlg(void);
     bool  getEsfStatus(ubx_esf_status_t &esf);
+    void  getEsfAlg(ubx_esf_alg_t &algInfo);
     bool  setReset(void);
     bool  resetOdometer(void);
     bool  updateOdometer(void);
@@ -889,6 +914,11 @@ public:
     bool  disableUBX(void);
     bool  enablePUBX(uint8_t intervalSec, uint8_t slowIntervalSec);
     bool  disablePUBX(void);
+    bool  set_auto_imu_alignment(bool enable);
+    bool  is_auto_imu_alignment_enable(void);
+    bool  is_auto_imu_alignment_ready(void);
+    bool  start_save_auto_imu_aligment(void);
+    bool  save_auto_imu_aligment(void);
 
     bool  createLog(void);
     bool  eraseLog(void);
@@ -948,6 +978,7 @@ private:
     uint8_t gpsUnit;
     uint32_t last_receive_time;
     ubx_esf_status_t esf_status;
+    ubx_esf_alg_t    alg_info;
     ubx_nav_odo_t    nav_odo;
     ubx_mon_ver_t    mon_ver;
     ubx_dynamic_model_t cfg_dyn_model; // Model read from device
@@ -1049,6 +1080,7 @@ private:
     unsigned int stabilityWindowNext;
     time_t stabilityWindowLastTimestamp;
     bool isStable;
+    bool enable_auto_imu_alignment = false;
     uint32_t startLockUptime;
 };
 
