@@ -270,6 +270,7 @@ void ubloxGPS::updateGPS(void)
             else
             {
                 processBytes();
+                auto_imu_process();
                 gps_mutex.unlock();
             }
         }
@@ -706,7 +707,7 @@ void ubloxGPS::processUBX()
 		alg_info.yaw = ubx_rx_msg.ubx_msg[8] | (ubx_rx_msg.ubx_msg[9] << 8) | (ubx_rx_msg.ubx_msg[10] << 16) | (ubx_rx_msg.ubx_msg[11] << 24);
 		alg_info.pitch = ubx_rx_msg.ubx_msg[12] | (ubx_rx_msg.ubx_msg[13] << 8);
 		alg_info.roll = ubx_rx_msg.ubx_msg[14] | (ubx_rx_msg.ubx_msg[15] << 8);
-		Log.info("version == %d,yaw == %.2f,pitch == %.2f,roll == %.2f", alg_info.version, ((float)alg_info.yaw) / 100, ((float)alg_info.pitch) / 100, ((float)alg_info.roll) / 100);
+		Log.info("autoMntAlgOn == %d,version == %d,yaw == %.2f,pitch == %.2f,roll == %.2f",alg_info.flags.autoMntAlgOn, alg_info.version, ((float)alg_info.yaw) / 100, ((float)alg_info.pitch) / 100, ((float)alg_info.roll) / 100);
 		if(log_enabled)
 		{
 			Loglib.info("[UBX_ESF_ALG]: iTow == %ld", alg_info.iTow);
@@ -915,6 +916,7 @@ bool ubloxGPS::updateEsfAlg(void)
 	LOCK();
 	// This message outputs the IMU alignment angles which define the rotation from the installation-frame to the IMU-frame
 	uint8_t sentences[4] = { (uint8_t)UBX_CLASS_ESF, (uint8_t)UBX_ESF_ALG, 0x00, 0x00 };
+    Log.info("### updateEsfAlg ###");
 	return requestSendUBX(sentences, 4);
 }
 
@@ -930,6 +932,7 @@ void ubloxGPS::getEsfAlg(ubx_esf_alg_t &algInfo)
 {
 	LOCK();
 	memcpy(&algInfo, &alg_info, sizeof(ubx_esf_alg_t));
+    Log.info("### getEsfAlg ###");
 	if(log_enabled)
 	{	
 		Loglib.info("[getEsfAlg]: iTow == %ld", alg_info.iTow);
@@ -1394,12 +1397,16 @@ bool ubloxGPS::disableUBX(void)
 bool ubloxGPS::set_auto_imu_alignment(bool enable)
 {
 	LOCK();
+    uint32_t bitField = (enable ? 1 : 0) << 8;;
 	uint8_t sentences[16] = {0x00};
 	sentences[0] = (uint8_t)UBX_CLASS_CFG;
 	sentences[1] = (uint8_t)UBX_CFG_ESFALG;
 	sentences[2] = 0x0C;
 	sentences[3] = 0x00;
-	sentences[4] = (enable ? 1 : 0) << 8;
+	sentences[4] = (bitField >> 0) & 0xFF;
+    sentences[5] = (bitField >> 8) & 0xFF;
+    sentences[6] = (bitField >> 16) & 0xFF;
+    sentences[7] = (bitField >> 24) & 0xFF;
 	enable_auto_imu_alignment = enable;
 	memset(&alg_info,0,sizeof(ubx_esf_alg_t));
 	Log.info("set auto IMU alignment %s", enable_auto_imu_alignment ? "enable" : "disable");
@@ -1442,7 +1449,7 @@ bool ubloxGPS::save_auto_imu_aligment(void)
 	//deviceMask
     sentences[16] = 0x03;
 
-	Log.info("save_auto_imu_aligment !");
+	Log.info("### save_auto_imu_aligment ###");
 	return requestSendUBX(sentences, sizeof(sentences));	
 }
 
@@ -1455,6 +1462,7 @@ bool ubloxGPS::is_auto_imu_alignment_enable(void)
 
 bool ubloxGPS::is_auto_imu_alignment_ready(void)
 {
+#if 0    
 	uint8_t ret = alg_info.flags.autoMntAlgOn & (esf_status.fusionMode == 1 ? 1 : 0);
 	if(log_enabled)
 	{
@@ -1467,9 +1475,57 @@ bool ubloxGPS::is_auto_imu_alignment_ready(void)
 		}
 		*/
 		Log.info("auto imu alignment is %s", ret ? "ready" : "not ready");
-	}
+	}    
 	return ret ? true : false;
+#else
+    return (alg_info.flags.autoMntAlgOn == 1 && alg_info.flags.status == 3);
+#endif
 }
+
+void ubloxGPS::auto_imu_process()
+{
+    if (enable_auto_imu_alignment)
+    {
+        static bool lastAutoIMUReadyState = false;
+        static uint32_t lastIMUUpdate = millis();     
+        if (millis() - lastIMUUpdate >= IMU_STATUS_INTERVAL_MS) 
+        {       
+            bool state = is_auto_imu_alignment_ready();
+            lastIMUUpdate = millis();  
+            if (state == false)
+            {           
+                if (alg_info.flags.autoMntAlgOn == 0)
+                {                
+                    updateEsfAlg();       
+                }
+                else
+                {
+                    if (esf_status.fusionMode == 0)
+                    {
+                        updateEsfStatus();             
+                    }   
+                    else
+                    {
+                        //fetch roll/yaw/pitch angles when auto imu ready
+                        updateEsfAlg();    
+                    }                 
+                }                              
+            }              
+            else
+            {
+                if (lastAutoIMUReadyState != state)
+                {                                               
+                    lastAutoIMUReadyState = state;
+                    enable_auto_imu_alignment = false;             
+                    Log.info("### auto imu alignment is ready ###");
+                    save_auto_imu_aligment();                                         
+                }                        
+            }
+        }        
+    }
+    
+}
+
 bool ubloxGPS::requestSendUBX(const uint8_t *sentences, uint16_t len)
 {
     uint8_t flags = 0x00;
