@@ -45,6 +45,9 @@ RecursiveMutex gps_mutex;
 
 #define LOCK()      std::lock_guard<RecursiveMutex> __gps_guard(gps_mutex);
 
+#define IS_SENS_STATUS2_CALIBRATED(X)						((X & 0x03) >= 0x02 ? 1 : 0)
+#define IS_SENS_STATUS1_USE_FOR_FUSION_SOLUTION(X)			((X >> 6) & 0x01)
+
 static const int MAX_GPS_AGE_MS = 10000; // GPS location must be newer than this to be considered valid
 
 static const uint8_t SYNC_1 = 0xB5;
@@ -693,6 +696,24 @@ void ubloxGPS::processUBX()
         Log.info("==== UBX CFG NAV5 ====");
         Log.info("dynModel :%d", (int)cfg_dyn_model);
     }
+	else if (ubx_rx_msg.msg_class == UBX_CLASS_ESF && ubx_rx_msg.msg_id == UBX_ESF_ALG)
+	{//check IMU alignment information
+		alg_info.iTow = ubx_rx_msg.ubx_msg[0] | (ubx_rx_msg.ubx_msg[1] << 8) | (ubx_rx_msg.ubx_msg[2] << 16) | (ubx_rx_msg.ubx_msg[3] << 24);
+		alg_info.version = ubx_rx_msg.ubx_msg[4];
+		memcpy((uint8_t *)&alg_info.flags,ubx_rx_msg.ubx_msg + 5,1);
+		memcpy((uint8_t *)&alg_info.error,ubx_rx_msg.ubx_msg + 6,1);
+		alg_info.reserved1 = ubx_rx_msg.ubx_msg[7];
+		alg_info.yaw = ubx_rx_msg.ubx_msg[8] | (ubx_rx_msg.ubx_msg[9] << 8) | (ubx_rx_msg.ubx_msg[10] << 16) | (ubx_rx_msg.ubx_msg[11] << 24);
+		alg_info.pitch = ubx_rx_msg.ubx_msg[12] | (ubx_rx_msg.ubx_msg[13] << 8);
+		alg_info.roll = ubx_rx_msg.ubx_msg[14] | (ubx_rx_msg.ubx_msg[15] << 8);
+		Log.info("version == %d,yaw == %.2f,pitch == %.2f,roll == %.2f", alg_info.version, ((float)alg_info.yaw) / 100, ((float)alg_info.pitch) / 100, ((float)alg_info.roll) / 100);
+		if(log_enabled)
+		{
+			Loglib.info("[UBX_ESF_ALG]: iTow == %ld", alg_info.iTow);
+			Loglib.info("flags ==> autoMntAlgOn == %d,status == %d", alg_info.flags.autoMntAlgOn,alg_info.flags.status);
+			Loglib.info("error ==> titleAlg == %d,angleAlg == %d,yawAlg == %d", alg_info.error.titleAlg,alg_info.error.angleAlg,alg_info.error.yawAlg);
+		}
+	}	
 }
 
 
@@ -889,11 +910,33 @@ bool ubloxGPS::updateEsfStatus(void)
     return requestSendUBX(sentences, 4);
 }
 
+bool ubloxGPS::updateEsfAlg(void)
+{
+	LOCK();
+	// This message outputs the IMU alignment angles which define the rotation from the installation-frame to the IMU-frame
+	uint8_t sentences[4] = { (uint8_t)UBX_CLASS_ESF, (uint8_t)UBX_ESF_ALG, 0x00, 0x00 };
+	return requestSendUBX(sentences, 4);
+}
+
+
 bool ubloxGPS::getEsfStatus(ubx_esf_status_t &esf)
 {
     LOCK();
     memcpy(&esf, &esf_status, sizeof(ubx_esf_status_t));
     return esf_status.valid;
+}
+
+void ubloxGPS::getEsfAlg(ubx_esf_alg_t &algInfo)
+{
+	LOCK();
+	memcpy(&algInfo, &alg_info, sizeof(ubx_esf_alg_t));
+	if(log_enabled)
+	{	
+		Loglib.info("[getEsfAlg]: iTow == %ld", alg_info.iTow);
+		Loglib.info("version == %d,yaw == %ld,pitch == %d,,roll == %d,", alg_info.version, alg_info.yaw, alg_info.pitch, alg_info.roll);
+		Loglib.info("flags ==> autoMntAlgOn == %d,status == %d", alg_info.flags.autoMntAlgOn,alg_info.flags.status);
+		Loglib.info("error ==> titleAlg == %d,angleAlg == %d,yawAlg == %d", alg_info.error.titleAlg,alg_info.error.angleAlg,alg_info.error.yawAlg);
+	}
 }
 
 bool ubloxGPS::setReset(void)
@@ -1348,6 +1391,85 @@ bool ubloxGPS::disableUBX(void)
     return err == 0 ? true : false;
 }
 
+bool ubloxGPS::set_auto_imu_alignment(bool enable)
+{
+	LOCK();
+	uint8_t sentences[16] = {0x00};
+	sentences[0] = (uint8_t)UBX_CLASS_CFG;
+	sentences[1] = (uint8_t)UBX_CFG_ESFALG;
+	sentences[2] = 0x0C;
+	sentences[3] = 0x00;
+	sentences[4] = (enable ? 1 : 0) << 8;
+	enable_auto_imu_alignment = enable;
+	memset(&alg_info,0,sizeof(ubx_esf_alg_t));
+	Log.info("set auto IMU alignment %s", enable_auto_imu_alignment ? "enable" : "disable");
+	return requestSendUBX(sentences, sizeof(sentences));
+}
+
+bool ubloxGPS::start_save_auto_imu_aligment(void)
+{
+	if (is_auto_imu_alignment_ready())
+	{		
+		save_auto_imu_aligment();
+        return true;
+	}	
+	return false;
+}
+
+bool ubloxGPS::save_auto_imu_aligment(void)
+{
+	LOCK();
+	uint8_t sentences[17] = {0x00};
+	sentences[0] = (uint8_t)UBX_CLASS_CFG;
+	sentences[1] = (uint8_t)UBX_CFG_CFG;
+	sentences[2] = 0x0D;
+    sentences[3] = 0x00;
+	//clearMask;
+	sentences[4] = 0x00;
+	sentences[5] = 0x00;
+	sentences[6] = 0x00;
+	sentences[7] = 0x00;
+	//saveMask
+	sentences[8] = 0xFF;
+	sentences[9] = 0xFF;
+	sentences[10] = 0xFF;
+	sentences[11] = 0xFF;
+	//loadMask
+	sentences[12] = 0xFF;
+	sentences[13] = 0xFF;
+	sentences[14] = 0xFF;	
+	sentences[15] = 0xFF;
+	//deviceMask
+    sentences[16] = 0x03;
+
+	Log.info("save_auto_imu_aligment !");
+	return requestSendUBX(sentences, sizeof(sentences));	
+}
+
+
+bool ubloxGPS::is_auto_imu_alignment_enable(void)
+{
+	return enable_auto_imu_alignment;
+}
+
+
+bool ubloxGPS::is_auto_imu_alignment_ready(void)
+{
+	uint8_t ret = alg_info.flags.autoMntAlgOn & (esf_status.fusionMode == 1 ? 1 : 0);
+	if(log_enabled)
+	{
+		Loglib.info("is_auto_imu_alignment_ready: numSens == %d , fusionMode == %d",esf_status.numSens,esf_status.fusionMode);
+		/*
+		for (int i = 0; i < esf_status.numSens; i++)
+		{
+			Log.info("%d. sensStatus1 == 0x%02X , sensor%d data is %s for the current sensor fusion solution",i,esf_status.sensStatus1[i],i,IS_SENS_STATUS1_USE_FOR_FUSION_SOLUTION(esf_status.sensStatus1[i]) ? "use" : "not use");
+			Log.info("   %s",IS_SENS_STATUS2_CALIBRATED(esf_status.sensStatus2[i]) ? "calibrated" : "not calibrated");
+		}
+		*/
+		Log.info("auto imu alignment is %s", ret ? "ready" : "not ready");
+	}
+	return ret ? true : false;
+}
 bool ubloxGPS::requestSendUBX(const uint8_t *sentences, uint16_t len)
 {
     uint8_t flags = 0x00;
