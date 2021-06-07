@@ -22,6 +22,7 @@
 const uint16_t UBX_RX_MSG_MAX_LEN = 512;
 const uint16_t UBX_LOG_STRING_MAX_LEN = 256;
 const size_t UBX_MGA_FLASH_DATA_MAX_LEN = 512;
+const uint32_t IMU_STATUS_INTERVAL_MS = 2000;
 
 typedef enum {
     UBX_CLASS_NAV      = 0x01,  // Navigation Results Messages: Position, Speed, Time, Acceleration, Heading, DOP, SVs used
@@ -919,6 +920,7 @@ public:
     bool  is_auto_imu_alignment_ready(void);
     bool  start_save_auto_imu_aligment(void);
     bool  save_auto_imu_aligment(void);
+    void  auto_imu_process();
 
     bool  createLog(void);
     bool  eraseLog(void);
