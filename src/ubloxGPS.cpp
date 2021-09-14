@@ -73,20 +73,45 @@ static void nmea_event_log_cb(gps_t* gh, gps_statement_t res)
 
 ubloxGPS::ubloxGPS(USARTSerial &serial,
     std::function<bool(bool)> pwr_enable) :
+    interface(ubloxGpsInterface::Uart),
+    spi(nullptr),
+    spi_settings(5*MHZ, MSBFIRST, SPI_MODE0),
+    spi_select(nullptr),
+    tx_ready_mcu_pin(PIN_INVALID),
+    tx_ready_gps_pin(PIN_INVALID),
+
     serial(&serial),
+
     pwr_enable(pwr_enable),
     tx_ready_queue(nullptr),
+    log_enabled(true),
     debugNMEA(false),
-    gpsThread(NULL),
+    gpsThread(nullptr),
     lastLockTime(0),
+    ubx_rx_msg({}),
+    write_mga_active(false),
+    write_mga_sequence(0),
+
+    initializing(false),
     gpsStatus(GPS_STATUS_OFF),
+    powerOn(false),
+
+    lockMethod(ubloxGpsLockMethod::HorizontalAccuracy),
+    hdopStability(STABILITY_HDOP_THRESHOLD),
+
     gpsUnit(0),
+    last_receive_time(0),
+    esf_status({}),
+    nav_odo({}),
+    mon_ver({}),
+    cfg_dyn_model(UBX_DEFAULT_MODEL),
+
     stabilityWindowLength(0),
     stabilityWindowNext(0),
     isStable(false),
     startLockUptime(0)
 {
-    pwr_enable(false);
+    enablePower(false);
     gps_init(&nmea_gps, nmea_uptime_wrapper);
 }
 
@@ -95,24 +120,44 @@ ubloxGPS::ubloxGPS(SPIClass &spi,
     std::function<bool(bool)> pwr_enable,
     int tx_ready_mcu_pin,
     int tx_ready_gps_pin) :
+    interface(ubloxGpsInterface::Spi),
     spi(&spi),
     spi_settings(5*MHZ, MSBFIRST, SPI_MODE0),
     spi_select(spi_select),
-    pwr_enable(pwr_enable),
     tx_ready_mcu_pin(tx_ready_mcu_pin),
     tx_ready_gps_pin(tx_ready_gps_pin),
+
+    serial(nullptr),
+
+    pwr_enable(pwr_enable),
     tx_ready_queue(nullptr),
+    log_enabled(true),
     debugNMEA(false),
-    gpsThread(NULL),
+    gpsThread(nullptr),
     lastLockTime(0),
+    ubx_rx_msg({}),
+    write_mga_active(false),
+    write_mga_sequence(0),
+
+    initializing(false),
     gpsStatus(GPS_STATUS_OFF),
+    powerOn(false),
+    lockMethod(ubloxGpsLockMethod::HorizontalAccuracy),
+    hdopStability(STABILITY_HDOP_THRESHOLD),
+
     gpsUnit(0),
+    last_receive_time(0),
+    esf_status({}),
+    nav_odo({}),
+    mon_ver({}),
+    cfg_dyn_model(UBX_DEFAULT_MODEL),
+
     stabilityWindowLength(0),
     stabilityWindowNext(0),
     isStable(false),
     startLockUptime(0)
 {
-    pwr_enable(false);
+    enablePower(false);
     spi_select(false);
     gps_init(&nmea_gps, nmea_uptime_wrapper);
 }
@@ -125,6 +170,16 @@ void ubloxGPS::lock()
 void ubloxGPS::unlock()
 {
     gps_mutex.unlock();
+}
+
+int ubloxGPS::enablePower(bool enable)
+{
+    auto ret = pwr_enable(enable);
+    if (!ret) {
+        return SYSTEM_ERROR_IO;
+    }
+    powerOn = enable;
+    return SYSTEM_ERROR_NONE;
 }
 
 void ubloxGPS::txReadyHandler()
@@ -141,6 +196,16 @@ bool ubloxGPS::isLockStable()
     LOCK();
 
     return getLock() && isStable;
+}
+
+int ubloxGPS::setLockHdopThreshold(double threshold)
+{
+    if (0.0 < threshold) {
+        return SYSTEM_ERROR_INVALID_ARGUMENT;
+    }
+
+    hdopStability = threshold;
+    return SYSTEM_ERROR_NONE;
 }
 
 unsigned int ubloxGPS::getLockDuration()
@@ -176,31 +241,37 @@ void ubloxGPS::processLockStability()
     {
         return;
     }
-    if(stabilityWindowLength < STABILITY_WINDOW_LENGTH)
-    {
-        stabilityWindowLength++;
+    if (ubloxGpsLockMethod::HorizontalAccuracy == lockMethod) {
+        if(stabilityWindowLength < STABILITY_WINDOW_LENGTH)
+        {
+            stabilityWindowLength++;
+        }
+        stabilityWindow[stabilityWindowNext] = getHorizontalAccuracy();
+        stabilityWindowNext = (stabilityWindowNext + 1) % STABILITY_WINDOW_LENGTH;
+
+        float avg = 0.0;
+        for(unsigned int i=0; i < stabilityWindowLength; i++)
+        {
+            avg += stabilityWindow[i];
+        }
+        avg /= stabilityWindowLength;
+
+        float std_dev = 0.0;
+        for(unsigned int i=0; i < stabilityWindowLength; i++)
+        {
+            float temp = (avg - stabilityWindow[i]);
+            std_dev += temp * temp;
+        }
+        std_dev /= stabilityWindowLength;
+        std_dev = sqrt(std_dev);
+
+        isStable = ((stabilityWindowLength == STABILITY_WINDOW_LENGTH) && (std_dev < (avg * STABILITY_WINDOW_THRESHOLD)));
+    } else if (ubloxGpsLockMethod::HorizontalDop == lockMethod) {
+        isStable = (getHDOP() < (double)hdopStability);
+    } else {
+        isStable = true;
     }
-    stabilityWindow[stabilityWindowNext] = getHorizontalAccuracy();
     stabilityWindowLastTimestamp = last_timestamp;
-    stabilityWindowNext = (stabilityWindowNext + 1) % STABILITY_WINDOW_LENGTH;
-
-    float avg = 0.0;
-    for(unsigned int i=0; i < stabilityWindowLength; i++)
-    {
-        avg += stabilityWindow[i];
-    }
-    avg /= stabilityWindowLength;
-
-    float std_dev = 0.0;
-    for(unsigned int i=0; i < stabilityWindowLength; i++)
-    {
-        float temp = (avg - stabilityWindow[i]);
-        std_dev += temp * temp;
-    }
-    std_dev /= stabilityWindowLength;
-    std_dev = sqrt(std_dev);
-
-    isStable = ((stabilityWindowLength == STABILITY_WINDOW_LENGTH) && (std_dev < (avg * STABILITY_WINDOW_THRESHOLD)));
 }
 
 void ubloxGPS::processGPSByte(uint8_t c)
@@ -208,7 +279,7 @@ void ubloxGPS::processGPSByte(uint8_t c)
     // in SPI mode there are too many null 0xFF reads to reasonably log raw
     // traffic on the SPI port as we don't know at this layer if the byte is
     // part of an actual message or not
-    if (debugNMEA && log_enabled && serial) {
+    if (debugNMEA && log_enabled && isInterfaceUart()) {
     #if (GPS_HEX_LOGGING == 1)
         const char d = ',';
         Loglib.dump(LOG_LEVEL_TRACE, &c, 1);
@@ -225,14 +296,16 @@ void ubloxGPS::processGPSByte(uint8_t c)
     // parse NMEA message
     gps_process(&nmea_gps, &c, 1, log_enabled ? nmea_event_log_cb :  nullptr);
 
-    if (getLock())
-    {
-        lastLockTime = Time.now() - (System.uptime() - nmea_gps.time_timestamp);
-        gpsStatus = GPS_STATUS_LOCK;
-    }
-    else
-    {
-        gpsStatus = GPS_STATUS_FIXING;
+    if (!initializing) {
+        if (getLock())
+        {
+            lastLockTime = Time.now() - (System.uptime() - nmea_gps.time_timestamp);
+            gpsStatus = GPS_STATUS_LOCK;
+        }
+        else
+        {
+            gpsStatus = GPS_STATUS_FIXING;
+        }
     }
 
     processLockStability();
@@ -246,7 +319,7 @@ void ubloxGPS::updateGPS(void)
     while (true) {
         bool available =yieldThread(UBX_MAX_POLL_INTERVAL_MS);
 
-        if (gpsStatus != GPS_STATUS_OFF)
+        if ((gpsStatus != GPS_STATUS_OFF) && (gpsStatus != GPS_STATUS_ERROR))
         {
             // try and acquire the lock in a non-blocking fashion as another
             // thread may have already acquired the lock and also be pending
@@ -273,29 +346,37 @@ void ubloxGPS::updateGPS(void)
     }
 }
 
-void ubloxGPS::setOn(lib_config_t &config)
+int ubloxGPS::setOn(lib_config_t &config)
 {
     LOCK();
 
-    if(serial)
+    if(isInterfaceUart())
     {
         serial->begin((uint32_t)UBX_BAUDRATE_DEFAULT);
     }
 
-    pwr_enable(true);
+    enablePower(true);
+    initializing = true;
+    gps_init(&nmea_gps, nmea_uptime_wrapper);
 
-    gpsStatus = GPS_STATUS_FIXING;
+    NAMED_SCOPE_GUARD(exitScope, {
+        gpsStatus = GPS_STATUS_ERROR;
+        enablePower(false);
+        if (log_enabled) {
+            Loglib.error("Initialization failed");
+        }
+    });
     delay(1000); //delay 1000ms to wait for ubloxGPS get ready for receive UBX command (tested value)
 
-    if(serial)
+    if(isInterfaceUart())
     {
         // set high baudrate to improve performance
-        setBaudrate((ubx_baudrate_t)config.baudrate);
-        if(log_enabled) Loglib.info("UBX baudrate is %lu", config.baudrate);
-    }
-
-    if(tx_ready_mcu_pin != PIN_INVALID && tx_ready_gps_pin != PIN_INVALID)
-    {
+        CHECK_TRUE(setBaudrate((ubx_baudrate_t)config.baudrate), SYSTEM_ERROR_IO);
+        if(log_enabled)
+            Loglib.info("UBX baudrate is %lu", config.baudrate);
+    } else if (isInterfaceSpi()) {
+        CHECK_FALSE((tx_ready_mcu_pin == PIN_INVALID) || (tx_ready_gps_pin == PIN_INVALID), SYSTEM_ERROR_INVALID_ARGUMENT);
+        // TODO: break this conditional up to exit on queue create error
         if(!tx_ready_queue && !os_queue_create(&tx_ready_queue, sizeof(uint8_t), 1, nullptr))
         {
             pinMode(tx_ready_mcu_pin, INPUT);
@@ -303,79 +384,71 @@ void ubloxGPS::setOn(lib_config_t &config)
             {
                 os_queue_destroy(tx_ready_queue, nullptr);
                 tx_ready_queue = nullptr;
+                return SYSTEM_ERROR_NO_MEMORY;
             }
         }
 
-        if(tx_ready_queue)
-        {
-            // first process all bytes off of the port, reconfiguring seems to drop
-            // some startup frames that are useful debug indications
-            processBytes();
+        // first process all bytes off of the port, reconfiguring seems to drop
+        // some startup frames that are useful debug indications
+        processBytes();
 
-            ubx_cfg_port_t msg = {
-                .header = {.msg_class = UBX_CLASS_CFG, .msg_id = UBX_CFG_PRT},
-            };
-
-            msg.port = UBX_CFG_PRT_SPI;
-            msg.tx_ready.enable = 1;
-            msg.tx_ready.polarity = UBX_CFG_PRT_TX_READY_ACTIVE_LOW;
-            msg.tx_ready.pin = tx_ready_gps_pin;
-            msg.tx_ready.threshold = 0;
-            msg.mode.spi.mode = UBX_CFG_PRT_MODE_SPI_MODE_0;
-            msg.mode.spi.ff_count = 50;
-            msg.in_proto_mask = UBX_CFG_PRT_PROTO_UBX | UBX_CFG_PRT_PROTO_NMEA;
-            msg.out_proto_mask = msg.in_proto_mask;
-            msg.flags = UBX_CFG_PRT_FLAGS_EXTENDED_TIMEOUT;
-            msg.header.length = sizeof(msg) - sizeof(msg.header);
-
-            if(!requestSendUBX((const ubx_msg_t *) &msg, sizeof(msg), UBX_REQ_FLAGS_EXPECT_ACK))
-            {
-                // TODO: handle error... everywhere on init...
-            }
-        }
+        CHECK_TRUE(setSpiMode(tx_ready_gps_pin, 0, UBX_CFG_PRT_MODE_SPI_MODE_0), SYSTEM_ERROR_IO);
+    } else {
+        // Interface not defined
+        return SYSTEM_ERROR_INVALID_STATE;
     }
 
     if (config.output_pubx) {
-        enablePUBX(config.fastIntervalSec, config.slowIntervalSec);
-        disableNMEA();
+        CHECK_TRUE(enablePUBX(config.fastIntervalSec, config.slowIntervalSec), SYSTEM_ERROR_IO);
+        CHECK_TRUE(disableNMEA(), SYSTEM_ERROR_IO);
     } else {
-        enableNMEA(config.fastIntervalSec, config.slowIntervalSec);
-        disablePUBX();
+        CHECK_TRUE(enableNMEA(config.fastIntervalSec, config.slowIntervalSec), SYSTEM_ERROR_IO);
+        CHECK_TRUE(disablePUBX(), SYSTEM_ERROR_IO);
     }
 
-    configMsg(UBX_CLASS_ESF, UBX_ESF_STATUS, 10); // TODO: Once ESF is good maybe we can slow this down.
-    configMsg(UBX_CLASS_NAV, UBX_NAV_ODO, 5);
+    CHECK_TRUE(configMsg(UBX_CLASS_ESF, UBX_ESF_STATUS, 10), SYSTEM_ERROR_IO); // TODO: Once ESF is good maybe we can slow this down.
+    CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_ODO, 5), SYSTEM_ERROR_IO);
 
-    setGNSS(config.support_gnss);
-    setPower((ubx_power_mode_t)config.power_mode);
-    setMode((ubx_dynamic_model_t)config.dynamic_model);
+    CHECK_TRUE(setGNSS(config.support_gnss), SYSTEM_ERROR_IO);
+    CHECK_TRUE(setPower((ubx_power_mode_t)config.power_mode), SYSTEM_ERROR_IO);
+    CHECK_TRUE(setMode((ubx_dynamic_model_t)config.dynamic_model), SYSTEM_ERROR_IO);
     last_receive_time = 0;
 
+    // TODO: Move this segment earlier and check for success
     if (!gpsThread) {
         gpsThread = new Thread("gps", [this]() { updateGPS(); }, OS_THREAD_PRIORITY_DEFAULT);
     }
+
+    exitScope.dismiss();
+    initializing = false;
+    gpsStatus = GPS_STATUS_FIXING;
+    return SYSTEM_ERROR_NONE;
 }
 
-void ubloxGPS::on(ubx_dynamic_model_t model)
+int ubloxGPS::on(ubx_dynamic_model_t model)
 {
     lib_config.resetDefault();
     lib_config.dynamic_model = model;
-    setOn(lib_config);
+    return setOn(lib_config);
 }
 
-void ubloxGPS::off(void)
+int ubloxGPS::off(void)
 {
+    initializing = false;
     gpsStatus = GPS_STATUS_OFF;
-    pwr_enable(false);
+    return enablePower(false);
 }
 
 bool ubloxGPS::is_active(void)
 {
-    if(gpsStatus != GPS_STATUS_OFF)
-    {
-        return  (millis() -last_receive_time < (lib_config.fastIntervalSec * 3000));
+    switch (gpsStatus) {
+        case GPS_STATUS_OFF:
+            // Fall through
+        case GPS_STATUS_ERROR:
+            return false;
     }
-    return false;
+
+    return  (millis() -last_receive_time < (lib_config.fastIntervalSec * 3000));
 }
 
 void ubloxGPS::setOutputNMEA(void)
@@ -522,6 +595,11 @@ double ubloxGPS::getGeoIdHeight(void)
 double ubloxGPS::getHDOP(void)
 {
     return (double) nmea_gps.dop_h;
+}
+
+double ubloxGPS::getVDOP(void)
+{
+    return (double) nmea_gps.dop_v;
 }
 
 uint8_t ubloxGPS::getSignalStrength(void)
@@ -822,10 +900,8 @@ bool ubloxGPS::setBaudrate(ubx_baudrate_t baudrate)
 {
     LOCK();
 
-    if(!serial)
-    {
-        return false;
-    }
+    CHECK_TRUE(isInterfaceUart(), false);
+
     uint8_t sentences[24] = {0};
     uint32_t br = (uint32_t)baudrate;
     sentences[0]  = (uint8_t)UBX_CLASS_CFG;
@@ -860,6 +936,30 @@ bool ubloxGPS::setBaudrate(ubx_baudrate_t baudrate)
     serial->end();
     serial->begin((uint32_t)baudrate);
     return (bool) (waitForAck(UBX_CLASS_CFG, UBX_CFG_PRT) != NULL);
+}
+
+/**
+ * Set configuration for ubloxGPS SPI port
+ *
+ */
+bool ubloxGPS::setSpiMode(int txReady, int threshold, int spiMode) {
+    ubx_cfg_port_t msg = {
+        .header = {.msg_class = UBX_CLASS_CFG, .msg_id = UBX_CFG_PRT},
+    };
+
+    msg.port = UBX_CFG_PRT_SPI;
+    msg.tx_ready.enable = 1;
+    msg.tx_ready.polarity = UBX_CFG_PRT_TX_READY_ACTIVE_LOW;
+    msg.tx_ready.pin = txReady;
+    msg.tx_ready.threshold = threshold;
+    msg.mode.spi.mode = spiMode;
+    msg.mode.spi.ff_count = 50;
+    msg.in_proto_mask = UBX_CFG_PRT_PROTO_UBX | UBX_CFG_PRT_PROTO_NMEA;
+    msg.out_proto_mask = msg.in_proto_mask;
+    msg.flags = UBX_CFG_PRT_FLAGS_EXTENDED_TIMEOUT;
+    msg.header.length = sizeof(msg) - sizeof(msg.header);
+
+    return requestSendUBX((const ubx_msg_t *) &msg, sizeof(msg), UBX_REQ_FLAGS_EXPECT_ACK);
 }
 
 bool ubloxGPS::setAntanna(ubx_antenna_t ant)
@@ -1402,7 +1502,7 @@ bool ubloxGPS::requestSendUBX(const ubx_msg_t *request,
     }
 
     // send out ubx command
-    if(serial)
+    if(isInterfaceUart())
     {
         serial->flush();
     }
@@ -1422,7 +1522,7 @@ void ubloxGPS::processBytes()
     bool _waiting = checkWaitingForAckOrRspFlags();
     bool bytes_available = false;
 
-    if(serial)
+    if(isInterfaceUart())
     {
         while (serial->available() > 0)
         {
@@ -1509,7 +1609,7 @@ bool ubloxGPS::yieldThread(uint32_t timeout)
         // a very quick operation
         // SPI is more resource intensive on a shared bus so use a longer delay
         // (tx ready is highly recommended for SPI usage)
-        if(serial)
+        if(isInterfaceUart())
         {
             delay(1);
         }
@@ -1628,7 +1728,7 @@ const ubx_msg_t *ubloxGPS::getResponse()
 
 size_t ubloxGPS::writeBytes(const uint8_t *tx_buf, size_t len)
 {
-    if(serial)
+    if(isInterfaceUart())
     {
         return serial->write(tx_buf, len);
     }
