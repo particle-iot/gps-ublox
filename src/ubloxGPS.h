@@ -234,7 +234,8 @@ typedef enum {
 typedef enum {
     GPS_STATUS_OFF,
     GPS_STATUS_FIXING,
-    GPS_STATUS_LOCK
+    GPS_STATUS_LOCK,
+    GPS_STATUS_ERROR,
 } gps_led_status_t;
 
 typedef enum {
@@ -599,6 +600,18 @@ struct ubx_mon_ver_t {
 
 constexpr ubx_dynamic_model_t UBX_DEFAULT_MODEL = UBX_DYNAMIC_MODEL_PORTABLE;
 
+enum class ubloxGpsInterface {
+    None,
+    Uart,
+    Spi,
+};
+
+enum class ubloxGpsLockMethod {
+    Lock,
+    HorizontalAccuracy,
+    HorizontalDop,
+};
+
 class ubloxGPS
 {
 
@@ -642,6 +655,26 @@ public:
     void unlock();
 
     /**
+     * @brief Indicate the GNSS power state
+     *
+     * @return true GNSS is powered on
+     * @return false GNSS is powered off
+     */
+    bool isOn() const {
+        return powerOn;
+    }
+
+    /**
+     * @brief Indicated the GNSS error state
+     *
+     * @return true GNSS is in error
+     * @return false GNSS is not in error
+     */
+    bool isError() const {
+        return (GPS_STATUS_ERROR == gpsStatus);
+    }
+
+    /**
      * @brief Interrupt handler for tx ready signal from gps (if enabled)
      *
      */
@@ -651,14 +684,19 @@ public:
      * @brief Power the GNSS module on and optionally configure the dynamic model
      *
      * @param model Dynamic model for dead reckoning configuration
+     * @retval SYSTEM_ERROR_NONE Success
+     * @retval SYSTEM_ERROR_NO_MEMORY Dynamic memory could not be allocated for queue/thread
+     * @retval SYSTEM_ERROR_INVALID_ARGUMENT One or more pin configuration is invalid
+     * @retval SYSTEM_ERROR_IO IO error on device
      */
-    void on(ubx_dynamic_model_t model = UBX_DEFAULT_MODEL);
+    int on(ubx_dynamic_model_t model = UBX_DEFAULT_MODEL);
 
     /**
      * @brief Power the GNSS module off
      *
+     * @retval SYSTEM_ERROR_NONE Success
      */
-    void off(void);
+    int off(void);
 
     /**
      * @brief Indicate whether the GNSS module is active and sending NMEA/UBX data
@@ -697,6 +735,42 @@ public:
     bool     isLockStable();
 
     /**
+     * @brief Set the lock stability HDP threshold
+     *
+     * @param threshold HDOP threshold
+     * @retval SYSTEM_ERROR_NONE Success
+     * @retval SYSTEM_ERROR_INVALID_ARGUMENT One or more input argument is invalid
+     */
+    int      setLockHdopThreshold(double threshold);
+
+    /**
+     * @brief Get the lock stability HDOP threshold
+     *
+     * @return double HDOP stability threshold
+     */
+    double   getLockHdopThreshold() const {
+        return hdopStability;
+    }
+
+    /**
+     * @brief Set the lock stability method
+     *
+     * @param method One of Lock, HorizontalAccuracy, or HorizontalHdop
+     */
+    void     setLockMethod(ubloxGpsLockMethod method) {
+        lockMethod = method;
+    }
+
+    /**
+     * @brief Get the lock stability method
+     *
+     * @return ubloxGpsLockMethod One of Lock, HorizontalAccuracy, or HorizontalHdop
+     */
+    ubloxGpsLockMethod getLockMethod() const {
+        return lockMethod;
+    }
+
+    /**
      * @brief Get the measured speed in the given units
      *
      * @param unit One of { GPS_SPEED_UNIT_MPS, GPS_SPEED_UNIT_MPH, GPS_SPEED_UNIT_KMPH }
@@ -726,9 +800,16 @@ public:
     /**
      * @brief Get the horizontal dilution of precision
      *
-     * @return double HDOP value in meters
+     * @return double HDOP value
      */
     double   getHDOP(void);
+
+    /**
+     * @brief Get the vertical dilution of precision
+     *
+     * @return double VDOP value
+     */
+    double   getVDOP(void);
 
     uint8_t  getSignalStrength(void);
 
@@ -756,6 +837,19 @@ public:
      *       you change baudrate, make sure config is successful.
      */
     bool  setBaudrate(ubx_baudrate_t baudrate);
+
+    /**
+     * @brief Set configuration for ubloxGPS SPI port
+     *
+     * @param txReady PIO to use for indicating that TX is ready.
+     * @param threshold Threshold of multiples of 8 bytes to signal TX ready pin assertion.
+     * @param spiMode SPI mode.  One of UBX_CFG_PRT_MODE_SPI_MODE_0, UBX_CFG_PRT_MODE_SPI_MODE_1, UBX_CFG_PRT_MODE_SPI_MODE_2, or UBX_CFG_PRT_MODE_SPI_MODE_3
+     *
+     * @retval true Configuration command sent and acknowledged successfully.
+     * @retval false Configuration command failed.
+     */
+    bool  setSpiMode(int txReady, int threshold, int spiMode);
+
     bool  setAntanna(ubx_antenna_t ant);
     bool  setRate(uint16_t measRateHz);
     bool  updateEsfStatus(void);
@@ -820,30 +914,43 @@ protected:
     bool checkWaitingForAckOrRspFlags() const;
 
 private:
-    SPIClass *spi = NULL;
+    ubloxGpsInterface interface;
+
+    // SPI related
+    SPIClass *spi;
     __SPISettings spi_settings;
-    USARTSerial *serial = NULL;
-    std::function<bool(bool)> spi_select = NULL;
-    std::function<bool(bool)> pwr_enable = NULL;
-    int tx_ready_mcu_pin = PIN_INVALID;
-    int tx_ready_gps_pin = PIN_INVALID;
-    os_queue_t tx_ready_queue = NULL; // to signal tx ready updates from interrupt
-    bool log_enabled = true;
+    std::function<bool(bool)> spi_select;
+    int tx_ready_mcu_pin;
+    int tx_ready_gps_pin;
+
+    // Serial related
+    USARTSerial *serial;
+
+    // Common
+    std::function<bool(bool)> pwr_enable;
+    os_queue_t tx_ready_queue; // to signal tx ready updates from interrupt
+    bool log_enabled;
     bool debugNMEA;
     Thread *gpsThread;
     uint32_t lastLockTime;
     ubx_rx_msg_t  ubx_rx_msg;
 
-    bool write_mga_active = false;
-    uint16_t write_mga_sequence = 0;
+    bool write_mga_active;
+    uint16_t write_mga_sequence;
 
+    // Status related
+    bool initializing;
     uint8_t gpsStatus;
+    bool powerOn;
+    ubloxGpsLockMethod lockMethod;
+    double hdopStability;
+
     uint8_t gpsUnit;
-    uint32_t last_receive_time = 0;
-    ubx_esf_status_t esf_status = {0};
-    ubx_nav_odo_t    nav_odo = {0};
-    ubx_mon_ver_t    mon_ver = {0};
-    ubx_dynamic_model_t cfg_dyn_model = UBX_DEFAULT_MODEL; // Model read from device
+    uint32_t last_receive_time;
+    ubx_esf_status_t esf_status;
+    ubx_nav_odo_t    nav_odo;
+    ubx_mon_ver_t    mon_ver;
+    ubx_dynamic_model_t cfg_dyn_model; // Model read from device
 
     bool  ackExpected;
     bool  rspExpected;
@@ -884,7 +991,14 @@ private:
     } lib_config_t;
     lib_config_t lib_config;
 
-    void setOn(lib_config_t &config);
+    bool isInterfaceUart() const {
+        return (ubloxGpsInterface::Uart == interface) && (serial);
+    }
+    bool isInterfaceSpi() const {
+        return (ubloxGpsInterface::Spi == interface);
+    }
+    int enablePower(bool enable);
+    int setOn(lib_config_t &config);
     void updateGPS(void);
     void processLockStability();
     void processGPSByte(uint8_t c);
@@ -926,6 +1040,8 @@ private:
     // std deviation in window must be under this percentage of mean to be
     // classified as stable
     static constexpr float STABILITY_WINDOW_THRESHOLD = 0.05;
+    // HDOP values less than this threshold will be considered stable
+    static constexpr double STABILITY_HDOP_THRESHOLD = 20.0;
 
     // track accuracy of previous points to determine if locked location is stable
     float stabilityWindow[STABILITY_WINDOW_LENGTH];
