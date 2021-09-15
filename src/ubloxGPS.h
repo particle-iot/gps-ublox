@@ -772,6 +772,9 @@ public:
 
     float    getDistance(double lat1, double long1, double lat2, double long2);
 
+    bool    getDistanceBearing(double lat1, double long1, double lat2, double long2,gps_float_t &distance,gps_float_t &bearing);
+
+
     /**
      * @brief Set new baudrate for ubloxGPS UART port
      *

@@ -571,6 +571,12 @@ float ubloxGPS::getDistance(double lat1, double long1, double lat2, double long2
     return distance;
 }
 
+
+bool ubloxGPS::getDistanceBearing(double lat1, double long1, double lat2, double long2,gps_float_t &distance,gps_float_t &bearing)
+{
+    return gps_distance_bearing(lat1, long1, lat2, long2, &distance, &bearing) == 1;
+}
+
 void ubloxGPS::enableDebugNMEA(bool en)
 {
     debugNMEA = en;
