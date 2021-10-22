@@ -652,6 +652,9 @@ public:
         int tx_ready_gps_pin = PIN_INVALID);
 
     gps_t nmea_gps;
+    
+    void config_gps_raw_data_adapter(USBSerial &serial);
+    void config_gps_raw_data_adapter(USARTSerial &serial);
 
     /**
      * @brief Acquires the gps lock, useful for multiple gps operations at a time
@@ -858,6 +861,7 @@ private:
     SPIClass *spi = NULL;
     __SPISettings spi_settings;
     USARTSerial *serial = NULL;
+    Stream *rawDataAdapter = NULL;
     std::function<bool(bool)> spi_select = NULL;
     std::function<bool(bool)> pwr_enable = NULL;
     int tx_ready_mcu_pin = PIN_INVALID;

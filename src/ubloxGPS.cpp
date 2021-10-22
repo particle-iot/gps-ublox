@@ -277,6 +277,21 @@ void ubloxGPS::updateGPS(void)
     }
 }
 
+void ubloxGPS::config_gps_raw_data_adapter(USBSerial &serial)
+{
+    LOCK();
+    serial.begin(lib_config.baudrate);
+    rawDataAdapter = &serial;
+}
+
+
+void ubloxGPS::config_gps_raw_data_adapter(USARTSerial &serial)
+{
+    LOCK();
+    serial.begin(lib_config.baudrate);
+    rawDataAdapter = &serial;
+}
+
 void ubloxGPS::setOn(lib_config_t &config)
 {
     LOCK();
@@ -1606,18 +1621,45 @@ void ubloxGPS::processBytes()
     bool _waiting = checkWaitingForAckOrRspFlags();
     bool bytes_available = false;
 
+    if (rawDataAdapter)
+    {
+        uint8_t data = 0;
+        uint8_t rxBuffer = 0;
+        while (rawDataAdapter->available() > 0)
+        {
+            data = rawDataAdapter->read();
+            if (serial)
+            {
+                serial->write(&data, 1);            
+            }
+            else
+            {
+                spi->beginTransaction(spi_settings);
+                spi_select(true);
+                spi->transfer((void *)&data, &rxBuffer, 1, NULL);
+                spi_select(false);
+                spi->endTransaction();
+            }            
+        }
+    }    
+
     if(serial)
     {
+        uint8_t data = 0;
         while (serial->available() > 0)
         {
-            processGPSByte(serial->read());
+            data = serial->read();
+            if (rawDataAdapter)
+            {
+                rawDataAdapter->write(&data,1);
+            }            
+            processGPSByte(data);
             if(_waiting && !checkWaitingForAckOrRspFlags())
             {
                 // break out if got an an expected frame to prevent overwrite
                 break;
             }
         }
-
         bytes_available = serial->available();
     }
     else
@@ -1653,6 +1695,10 @@ void ubloxGPS::processBytes()
                     got_data = true;
                 }
 
+                if (rawDataAdapter)
+                {
+                    rawDataAdapter->write(rx_buf + rx_buf_offset,1);
+                }    
                 processGPSByte(rx_buf[rx_buf_offset]);
 
                 if(_waiting && !checkWaitingForAckOrRspFlags())
