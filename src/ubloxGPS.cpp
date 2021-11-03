@@ -293,8 +293,20 @@ void ubloxGPS::processGPSByte(uint8_t c)
         // Loglib.info("UBX DECODE_RESULT_COMPLETE");
     }
 
+    int pos_timestamp_prev = nmea_gps.pos_timestamp;
+    int date_timestamp_prev = nmea_gps.date_timestamp;
+
     // parse NMEA message
     gps_process(&nmea_gps, &c, 1, log_enabled ? nmea_event_log_cb :  nullptr);
+
+    if (pos_timestamp_prev != nmea_gps.pos_timestamp)
+    {
+        perf_counts.pos_report_count++;
+    }
+    if (date_timestamp_prev != nmea_gps.date_timestamp)
+    {
+        perf_counts.time_report_count++;
+    }
 
     if (!initializing) {
         if (getLock())
@@ -1309,6 +1321,7 @@ bool ubloxGPS::disableNMEA(void)
     err |= configMsg(UBX_CLASS_NMEA, UBX_NEMA_GST, 0) ? 0 : 0x40;
     err |= configMsg(UBX_CLASS_NMEA, UBX_NEMA_ZDA, 0) ? 0 : 0x80;
     if (err != 0) {
+        perf_counts.disable_nmea_error_count++;
         if(log_enabled) Loglib.info("disableNMEA error: 0x%02X", err);
     }
     return err == 0 ? true : false;
@@ -1379,6 +1392,7 @@ bool ubloxGPS::enableNMEA(uint8_t intervalSec, uint8_t slowIntervalSec)
     err |= configMsg(UBX_CLASS_NMEA, UBX_NEMA_ZDA, 0) ? 0 : 0x80;
 #endif
     if (err != 0) {
+        perf_counts.enable_nmea_error_count++;
         if(log_enabled) Loglib.info("enableNMEA error: 0x%02X", err);
     }
     return err == 0 ? true : false;
@@ -1392,6 +1406,7 @@ bool ubloxGPS::disablePUBX(void)
     err |= configMsg(UBX_CLASS_PUBX, UBX_PUBX_SVSTATUS, 0) ? 0 : 0x02;
     err |= configMsg(UBX_CLASS_PUBX, UBX_PUBX_TIME,     0) ? 0 : 0x04;
     if (err != 0) {
+        perf_counts.disable_pubx_error_count++;
         if(log_enabled) Loglib.info("disablePUBX error: 0x%02X", err);
     }
     return err == 0 ? true : false;
@@ -1423,6 +1438,7 @@ bool ubloxGPS::enablePUBX(uint8_t intervalSec, uint8_t slowIntervalSec)
     err |= configMsg(UBX_CLASS_PUBX, UBX_PUBX_TIME, 0) ? 0 : 0x04;
 #endif
     if (err != 0) {
+        perf_counts.enable_pubx_error_count++;
         if(log_enabled) Loglib.info("enablePUBX error: 0x%02X", err);
     }
     return err == 0 ? true : false;
@@ -1443,6 +1459,7 @@ bool ubloxGPS::disableUBX(void)
     if(log_enabled) Loglib.info("disable NAV DOP");
     err |= configMsg(UBX_CLASS_NAV, UBX_NAV_DOP, 0) ? 0 : 0x10;
     if (err != 0) {
+        perf_counts.disable_ubx_error_count++;
         if(log_enabled) Loglib.info("disableUBX error: 0x%02X", err);
     }
     return err == 0 ? true : false;
@@ -1643,6 +1660,7 @@ void ubloxGPS::waitForAckOrRsp()
         if(millis() - t0 > UBX_MSG_TIMEOUT)
         {
             rxTimeout = true;
+            perf_counts.timeouts++;
             decodeStateHandler = &ubloxGPS::stateSync1;
             if(log_enabled)
             {
