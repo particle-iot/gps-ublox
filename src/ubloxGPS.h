@@ -910,6 +910,51 @@ public:
 
     void enableDebugNMEA(bool en);
     void hex_dump(LogLevel level, uint8_t *data, int len, Logger *logger=NULL);
+
+    typedef struct {
+        size_t pos_report_count {0};           //Count of PUBX POS, GPGGA, GNGGA reports
+        size_t time_report_count {0};          //Count of PUBX TIME reports
+
+        //The following are counts of error conditions
+        size_t timeouts {0};                   //Timeout waiting for reports
+        size_t enable_nmea_error_count {0};    //enableNMEA failure count
+        size_t disable_nmea_error_count {0};   //disableNMEA failure count
+        size_t enable_pubx_error_count {0};    //enablePUBX failure count
+        size_t disable_pubx_error_count {0};   //disablePUBX failure count
+        size_t disable_ubx_error_count {0};    //disableUBX failure count
+
+        size_t getTotalErrors() const {
+            return timeouts +
+                enable_nmea_error_count +
+                disable_nmea_error_count +
+                enable_pubx_error_count +
+                disable_pubx_error_count +
+                disable_ubx_error_count;
+        }
+        size_t getTotalCounts() const {
+            return getTotalErrors() +
+                pos_report_count +
+                time_report_count;
+        }
+    } perf_counts_t;
+
+    /**
+     * @brief Get the driver performance counters
+     *
+     * @return perf_counts_t Collection of performance counters
+     */
+    perf_counts_t getPerfCounts() const {
+        return perf_counts;
+    }
+
+    /**
+     * @brief Reset the driver performance counters
+     *
+     */
+    void resetPerfCounts() {
+        perf_counts = perf_counts_t{};
+    }
+
 protected:
     bool checkWaitingForAckOrRspFlags() const;
 
@@ -990,6 +1035,8 @@ private:
         }
     } lib_config_t;
     lib_config_t lib_config;
+
+    perf_counts_t perf_counts;
 
     bool isInterfaceUart() const {
         return (ubloxGpsInterface::Uart == interface) && (serial);
