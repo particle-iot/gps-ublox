@@ -874,6 +874,7 @@ private:
     uint16_t write_mga_sequence = 0;
 
     uint8_t navx5Buffer[NAVX5_PAYLOAD_SIZE] = {0};
+    uint32_t navx5BufferSize = NAVX5_PAYLOAD_SIZE;
 
     uint8_t gpsStatus;
     uint8_t gpsUnit;

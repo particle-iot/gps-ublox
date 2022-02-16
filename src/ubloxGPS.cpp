@@ -700,8 +700,12 @@ void ubloxGPS::processUBX()
     }
     else if (ubx_rx_msg.msg_class == UBX_CLASS_CFG && ubx_rx_msg.msg_id == UBX_CFG_NAVX5 ) {
         Log.info("==== UBX CFG UBX_CFG_NAVX5 length == %d ====",ubx_rx_msg.length);
-        memcpy(navx5Buffer,ubx_rx_msg.ubx_msg,NAVX5_PAYLOAD_SIZE);
-        Log.dump(navx5Buffer,NAVX5_PAYLOAD_SIZE);
+        if (navx5BufferSize != ubx_rx_msg.length && ubx_rx_msg.length != 0)
+        {
+            navx5BufferSize = ubx_rx_msg.length;
+        }
+        memcpy(navx5Buffer,ubx_rx_msg.ubx_msg,navx5BufferSize);
+        //Log.dump(navx5Buffer,navx5BufferSize);
     }
 	else if (ubx_rx_msg.msg_class == UBX_CLASS_ESF && ubx_rx_msg.msg_id == UBX_ESF_ALG)
 	{//check IMU alignment information
@@ -2265,22 +2269,18 @@ bool ubloxGPS::get_navx5()
 bool ubloxGPS::set_adr(bool enable)
 {
     LOCK();
-    if (navx5Buffer[0] == 0x00 && navx5Buffer[1] == 0x00)
-    {
-        get_navx5();
-    }    
     uint8_t sentences[4 + NAVX5_PAYLOAD_SIZE] = {0};
     sentences[0] = (uint8_t)UBX_CLASS_CFG;
     sentences[1] = (uint8_t)UBX_CFG_NAVX5;
-    sentences[2] = NAVX5_PAYLOAD_SIZE;
+    sentences[2] = navx5BufferSize;
     sentences[3] = 0x0;
 
     navx5Buffer[4] = 0xC0;
     navx5Buffer[39] = enable == true ? 0x1 : 0x0;
     Log.info("### %s: %s ADR ###",__FUNCTION__,enable ? "Enable" : "Disable");
 
-    memcpy(sentences + 4,navx5Buffer,NAVX5_PAYLOAD_SIZE);
-    return requestSendUBX(sentences, NAVX5_PAYLOAD_SIZE + 4);
+    memcpy(sentences + 4,navx5Buffer,navx5BufferSize);
+    return requestSendUBX(sentences, navx5BufferSize + 4);
 }
 
 uint8_t *ubloxGPS::get_navx5_config_data()
