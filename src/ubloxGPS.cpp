@@ -353,6 +353,7 @@ void ubloxGPS::setOn(lib_config_t &config)
     setGNSS(config.support_gnss);
     setPower((ubx_power_mode_t)config.power_mode);
     setMode((ubx_dynamic_model_t)config.dynamic_model);
+    get_navx5();
     last_receive_time = 0;
 
     if (!gpsThread) {
@@ -696,6 +697,11 @@ void ubloxGPS::processUBX()
 
         Log.info("==== UBX CFG NAV5 ====");
         Log.info("dynModel :%d", (int)cfg_dyn_model);
+    }
+    else if (ubx_rx_msg.msg_class == UBX_CLASS_CFG && ubx_rx_msg.msg_id == UBX_CFG_NAVX5 ) {
+        Log.info("==== UBX CFG UBX_CFG_NAVX5 length == %d ====",ubx_rx_msg.length);
+        memcpy(navx5Buffer,ubx_rx_msg.ubx_msg,NAVX5_PAYLOAD_SIZE);
+        Log.dump(navx5Buffer,NAVX5_PAYLOAD_SIZE);
     }
 	else if (ubx_rx_msg.msg_class == UBX_CLASS_ESF && ubx_rx_msg.msg_id == UBX_ESF_ALG)
 	{//check IMU alignment information
@@ -2241,4 +2247,43 @@ ubx_mga_flash_ack_type_t ubloxGPS::writeMGA(uint8_t *bytes, uint16_t length)
     }
 
     return UBX_MGA_FLASH_DATA_ACK_TIMEOUT;
+}
+
+
+bool ubloxGPS::get_navx5()
+{    
+    LOCK();
+    uint8_t sentences[4] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_CFG;
+    sentences[1] = (uint8_t)UBX_CFG_NAVX5;
+    sentences[2] = 0x00;
+    sentences[3] = 0x00;
+    return requestSendUBX(sentences, 4);
+}
+
+
+bool ubloxGPS::set_adr(bool enable)
+{
+    LOCK();
+    if (navx5Buffer[0] == 0x00 && navx5Buffer[1] == 0x00)
+    {
+        get_navx5();
+    }    
+    uint8_t sentences[4 + NAVX5_PAYLOAD_SIZE] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_CFG;
+    sentences[1] = (uint8_t)UBX_CFG_NAVX5;
+    sentences[2] = NAVX5_PAYLOAD_SIZE;
+    sentences[3] = 0x0;
+
+    navx5Buffer[4] = 0xC0;
+    navx5Buffer[39] = enable == true ? 0x1 : 0x0;
+    Log.info("### %s: %s ADR ###",__FUNCTION__,enable ? "Enable" : "Disable");
+
+    memcpy(sentences + 4,navx5Buffer,NAVX5_PAYLOAD_SIZE);
+    return requestSendUBX(sentences, NAVX5_PAYLOAD_SIZE + 4);
+}
+
+uint8_t *ubloxGPS::get_navx5_config_data()
+{
+    return navx5Buffer;
 }

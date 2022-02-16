@@ -23,6 +23,7 @@ const uint16_t UBX_RX_MSG_MAX_LEN = 512;
 const uint16_t UBX_LOG_STRING_MAX_LEN = 256;
 const size_t UBX_MGA_FLASH_DATA_MAX_LEN = 512;
 const uint32_t IMU_STATUS_INTERVAL_MS = 2000;
+const uint8_t NAVX5_PAYLOAD_SIZE = 44;
 
 typedef enum {
     UBX_CLASS_NAV      = 0x01,  // Navigation Results Messages: Position, Speed, Time, Acceleration, Heading, DOP, SVs used
@@ -845,7 +846,10 @@ public:
     String deg2DMS(float degree);
     float  DMS2deg(String DMS);
 
-
+    bool get_navx5();
+    uint8_t *get_navx5_config_data();
+    bool set_adr(bool enable);
+ 
     void enableDebugNMEA(bool en);
     void hex_dump(LogLevel level, uint8_t *data, int len, Logger *logger=NULL);
 protected:
@@ -868,6 +872,8 @@ private:
 
     bool write_mga_active = false;
     uint16_t write_mga_sequence = 0;
+
+    uint8_t navx5Buffer[NAVX5_PAYLOAD_SIZE] = {0};
 
     uint8_t gpsStatus;
     uint8_t gpsUnit;
