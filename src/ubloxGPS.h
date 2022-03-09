@@ -849,6 +849,10 @@ public:
     bool get_navx5();
     uint8_t *get_navx5_config_data();
     bool set_adr(bool enable);
+
+
+    bool updatePVT();
+    uint8_t getFixType();
  
     void enableDebugNMEA(bool en);
     void hex_dump(LogLevel level, uint8_t *data, int len, Logger *logger=NULL);
@@ -975,6 +979,7 @@ private:
     bool isStable;
     bool enable_auto_imu_alignment = false;
     uint32_t startLockUptime;
+    uint8_t fixType;
 };
 
 #endif /* __UBLOXGPS_H */

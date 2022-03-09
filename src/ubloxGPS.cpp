@@ -692,7 +692,11 @@ void ubloxGPS::processUBX()
             mon_ver.extension[str_ext.length()-1] = '\0';
         }
         mon_ver.valid = true;
-    }  else if (ubx_rx_msg.msg_class == UBX_CLASS_CFG && ubx_rx_msg.msg_id == UBX_CFG_NAV5 ) {
+    }   else if (ubx_rx_msg.msg_class == UBX_CLASS_NAV && ubx_rx_msg.msg_id == UBX_NAV_PVT ) {
+        fixType = ubx_rx_msg.ubx_msg[20];
+        Log.info("==== UBX_CLASS_NAV PVT ====");
+        Log.info("fixType :%d", (int)fixType);
+    }else if (ubx_rx_msg.msg_class == UBX_CLASS_CFG && ubx_rx_msg.msg_id == UBX_CFG_NAV5 ) {
         cfg_dyn_model = static_cast<ubx_dynamic_model_t>(ubx_rx_msg.ubx_msg[2] + ubx_rx_msg.ubx_msg[3] * 256);
 
         Log.info("==== UBX CFG NAV5 ====");
@@ -2287,3 +2291,24 @@ uint8_t *ubloxGPS::get_navx5_config_data()
 {
     return navx5Buffer;
 }
+
+bool ubloxGPS::updatePVT()
+{
+    //TODO: The firmware shall initialize the GPS with automotive mode at default
+    LOCK();
+    uint8_t sentences[40] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_NAV;
+    sentences[1] = (uint8_t)UBX_NAV_PVT;
+    sentences[2] = 0x00;
+    sentences[3] = 0x00;
+    return requestSendUBX(sentences, sentences[2] + 4);
+}
+
+uint8_t ubloxGPS::getFixType()
+{
+    if(updatePVT()){
+        return fixType;
+    }
+    return 0xFF;
+}
+
