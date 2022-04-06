@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 #include "Particle.h"
+#include "check.h"
 #include "ubloxGPS.h"
 #include <mutex>
 #include <cmath>
