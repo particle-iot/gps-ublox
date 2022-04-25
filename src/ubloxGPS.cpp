@@ -15,6 +15,7 @@
  */
 #include "Particle.h"
 #include "check.h"
+#include "scope_guard.h"
 #include "ubloxGPS.h"
 #include <mutex>
 #include <cmath>
