@@ -15,6 +15,7 @@
  */
 #include "Particle.h"
 #include "check.h"
+#include "scope_guard.h"
 #include "ubloxGPS.h"
 #include <mutex>
 #include <cmath>
@@ -365,7 +366,7 @@ int ubloxGPS::setOn(lib_config_t &config)
 
     if(isInterfaceUart())
     {
-        serial->begin((uint32_t)UBX_BAUDRATE_DEFAULT);
+        serial->begin((uint32_t)UBX_BAUDRATE_DEFAULT);     
     }
 
     enablePower(true);
@@ -384,10 +385,10 @@ int ubloxGPS::setOn(lib_config_t &config)
     if(isInterfaceUart())
     {
         // set high baudrate to improve performance
-        CHECK_TRUE(setBaudrate((ubx_baudrate_t)config.baudrate), SYSTEM_ERROR_IO);
+        setBaudrate((ubx_baudrate_t)config.baudrate);
         if(log_enabled)
             Loglib.info("UBX baudrate is %lu", config.baudrate);
-    } else if (isInterfaceSpi()) {
+    } else if (isInterfaceSpi()) {    
         CHECK_FALSE((tx_ready_mcu_pin == PIN_INVALID) || (tx_ready_gps_pin == PIN_INVALID), SYSTEM_ERROR_INVALID_ARGUMENT);
         // TODO: break this conditional up to exit on queue create error
         if(!tx_ready_queue && !os_queue_create(&tx_ready_queue, sizeof(uint8_t), 1, nullptr))
@@ -425,6 +426,7 @@ int ubloxGPS::setOn(lib_config_t &config)
     CHECK_TRUE(setGNSS(config.support_gnss), SYSTEM_ERROR_IO);
     CHECK_TRUE(setPower((ubx_power_mode_t)config.power_mode), SYSTEM_ERROR_IO);
     CHECK_TRUE(setMode((ubx_dynamic_model_t)config.dynamic_model), SYSTEM_ERROR_IO);
+    get_navx5();
     last_receive_time = 0;
 
     // TODO: Move this segment earlier and check for success
@@ -778,6 +780,19 @@ void ubloxGPS::processUBX()
             mon_ver.extension[str_ext.length()-1] = '\0';
         }
         mon_ver.valid = true;
+    }   else if (ubx_rx_msg.msg_class == UBX_CLASS_NAV && ubx_rx_msg.msg_id == UBX_NAV_PVT ) {
+        fixType = ubx_rx_msg.ubx_msg[20];
+        Log.info("==== UBX_CLASS_NAV PVT ====");
+        Log.info("fixType :%d", (int)fixType);
+    }
+    else if (ubx_rx_msg.msg_class == UBX_CLASS_CFG && ubx_rx_msg.msg_id == UBX_CFG_NAVX5 ) {
+        Log.info("==== UBX CFG UBX_CFG_NAVX5 length == %d ====",ubx_rx_msg.length);
+        if (navx5BufferSize != ubx_rx_msg.length && ubx_rx_msg.length != 0)
+        {
+            navx5BufferSize = ubx_rx_msg.length;
+        }
+        memcpy(navx5Buffer,ubx_rx_msg.ubx_msg,navx5BufferSize);
+        //Log.dump(navx5Buffer,navx5BufferSize);		
     }  else if (ubx_rx_msg.msg_class == UBX_CLASS_CFG && ubx_rx_msg.msg_id == UBX_CFG_NAV5 ) {
         cfg_dyn_model = static_cast<ubx_dynamic_model_t>(ubx_rx_msg.ubx_msg[2] + ubx_rx_msg.ubx_msg[3] * 256);
 
@@ -2188,4 +2203,58 @@ ubx_mga_flash_ack_type_t ubloxGPS::writeMGA(uint8_t *bytes, uint16_t length)
     }
 
     return UBX_MGA_FLASH_DATA_ACK_TIMEOUT;
+}
+
+bool ubloxGPS::get_navx5()
+{    
+    LOCK();
+    uint8_t sentences[4] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_CFG;
+    sentences[1] = (uint8_t)UBX_CFG_NAVX5;
+    sentences[2] = 0x00;
+    sentences[3] = 0x00;
+    return requestSendUBX(sentences, 4);
+}
+
+
+bool ubloxGPS::set_udr(bool enable)
+{
+    LOCK();
+    uint8_t sentences[4 + NAVX5_PAYLOAD_SIZE] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_CFG;
+    sentences[1] = (uint8_t)UBX_CFG_NAVX5;
+    sentences[2] = navx5BufferSize;
+    sentences[3] = 0x0;
+
+    navx5Buffer[4] = 0xC0;
+    navx5Buffer[39] = enable == true ? 0x1 : 0x0;
+    Log.info("### %s: %s UDR ###",__FUNCTION__,enable ? "Enable" : "Disable");
+
+    memcpy(sentences + 4,navx5Buffer,navx5BufferSize);
+    return requestSendUBX(sentences, navx5BufferSize + 4);
+}
+
+uint8_t *ubloxGPS::get_navx5_config_data()
+{
+    return navx5Buffer;
+}
+
+bool ubloxGPS::updatePVT()
+{
+    //TODO: The firmware shall initialize the GPS with automotive mode at default
+    LOCK();
+    uint8_t sentences[40] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_NAV;
+    sentences[1] = (uint8_t)UBX_NAV_PVT;
+    sentences[2] = 0x00;
+    sentences[3] = 0x00;
+    return requestSendUBX(sentences, sentences[2] + 4);
+}
+
+uint8_t ubloxGPS::getFixType()
+{
+    if(updatePVT()){
+        return fixType;
+    }
+    return 0xFF;
 }

@@ -22,6 +22,7 @@
 const uint16_t UBX_RX_MSG_MAX_LEN = 512;
 const uint16_t UBX_LOG_STRING_MAX_LEN = 256;
 const size_t UBX_MGA_FLASH_DATA_MAX_LEN = 512;
+const uint8_t NAVX5_PAYLOAD_SIZE = 44;
 
 typedef enum {
     UBX_CLASS_NAV      = 0x01,  // Navigation Results Messages: Position, Speed, Time, Acceleration, Heading, DOP, SVs used
@@ -907,7 +908,13 @@ public:
     String deg2DMS(float degree);
     float  DMS2deg(String DMS);
 
+    bool get_navx5();
+    uint8_t *get_navx5_config_data();
+    bool set_udr(bool enable);
 
+
+    bool updatePVT();
+    uint8_t getFixType();
     void enableDebugNMEA(bool en);
     void hex_dump(LogLevel level, uint8_t *data, int len, Logger *logger=NULL);
 
@@ -982,7 +989,8 @@ private:
 
     bool write_mga_active;
     uint16_t write_mga_sequence;
-
+    uint8_t navx5Buffer[NAVX5_PAYLOAD_SIZE] = {0};
+    uint32_t navx5BufferSize = NAVX5_PAYLOAD_SIZE;
     // Status related
     bool initializing;
     uint8_t gpsStatus;
@@ -1097,6 +1105,7 @@ private:
     time_t stabilityWindowLastTimestamp;
     bool isStable;
     uint32_t startLockUptime;
+    uint8_t fixType;
 };
 
 #endif /* __UBLOXGPS_H */
