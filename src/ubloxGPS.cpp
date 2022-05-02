@@ -67,7 +67,8 @@ static void nmea_event_log_cb(gps_t* gh, gps_statement_t res)
 {
     if(res != STAT_CHECKSUM_FAIL)
     {
-        nmea_log.trace("RX: %.*s", gh->sentence_len, gh->sentence);
+        Serial1.printlnf("%.*s", gh->sentence_len, gh->sentence);
+        // nmea_log.trace("RX: %.*s", gh->sentence_len, gh->sentence);
     }
 }
 
@@ -90,12 +91,12 @@ ubloxGPS::ubloxGPS(USARTSerial &serial,
     gps_init(&nmea_gps, nmea_uptime_wrapper);
 }
 
-ubloxGPS::ubloxGPS(SPIClass &spi,
+ubloxGPS::ubloxGPS(SPIClass &spi_bus,
     std::function<bool(bool)> spi_select,
     std::function<bool(bool)> pwr_enable,
     int tx_ready_mcu_pin,
     int tx_ready_gps_pin) :
-    spi(&spi),
+    spi_bus(&spi_bus),
     spi_settings(5*MHZ, MSBFIRST, SPI_MODE0),
     spi_select(spi_select),
     pwr_enable(pwr_enable),
@@ -114,6 +115,25 @@ ubloxGPS::ubloxGPS(SPIClass &spi,
 {
     pwr_enable(false);
     spi_select(false);
+    gps_init(&nmea_gps, nmea_uptime_wrapper);
+}
+
+ubloxGPS::ubloxGPS(TwoWire &i2c_bus,
+    std::function<bool(bool)> pwr_enable) :
+    i2c_bus(&i2c_bus),
+    pwr_enable(pwr_enable),
+    tx_ready_queue(nullptr),
+    debugNMEA(false),
+    gpsThread(NULL),
+    lastLockTime(0),
+    gpsStatus(GPS_STATUS_OFF),
+    gpsUnit(0),
+    stabilityWindowLength(0),
+    stabilityWindowNext(0),
+    isStable(false),
+    startLockUptime(0)
+{
+    pwr_enable(false);
     gps_init(&nmea_gps, nmea_uptime_wrapper);
 }
 
@@ -359,6 +379,7 @@ void ubloxGPS::setOn(lib_config_t &config)
 void ubloxGPS::on(ubx_dynamic_model_t model)
 {
     lib_config.resetDefault();
+    lib_config.output_pubx = false;
     lib_config.dynamic_model = model;
     setOn(lib_config);
 }
@@ -1453,11 +1474,11 @@ void ubloxGPS::processBytes()
             if(rx_buf_offset >= sizeof(rx_buf))
             {
                 // fully parsed last chunk, receive a new one
-                spi->beginTransaction(spi_settings);
+                spi_bus->beginTransaction(spi_settings);
                 spi_select(true);
-                spi->transfer(NULL, rx_buf, sizeof(rx_buf), NULL);
+                spi_bus->transfer(NULL, rx_buf, sizeof(rx_buf), NULL);
                 spi_select(false);
-                spi->endTransaction();
+                spi_bus->endTransaction();
                 rx_buf_offset = 0;
                 got_data = false;
             }
@@ -1642,11 +1663,11 @@ size_t ubloxGPS::writeBytes(const uint8_t *tx_buf, size_t len)
         for(unsigned int i=0; i < len; i += sizeof(rx_buf))
         {
             int _len = min(len-i, sizeof(rx_buf));
-            spi->beginTransaction(spi_settings);
+            spi_bus->beginTransaction(spi_settings);
             spi_select(true);
-            spi->transfer((void *) (tx_buf + i), rx_buf, _len, NULL);
+            spi_bus->transfer((void *) (tx_buf + i), rx_buf, _len, NULL);
             spi_select(false);
-            spi->endTransaction();
+            spi_bus->endTransaction();
             for(int j=0; j < _len; j++)
             {
                 processGPSByte(rx_buf[j]);

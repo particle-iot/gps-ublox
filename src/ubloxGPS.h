@@ -615,17 +615,24 @@ public:
     /**
      * @brief Construct a new ubloxGPS object
      *
-     * @param spi Reference to particular SPI interface
+     * @param spi_bus Reference to particular SPI interface
      * @param spi_select Callback function to control SPI chip select
      * @param pwr_enable Callback function to control power pin
      * @param tx_ready_mcu_pin Interrupt pin used on local MCU
      * @param tx_ready_gps_pin Interrupt pin used on the module MCU
      */
-    ubloxGPS(SPIClass &spi,
+    ubloxGPS(SPIClass &spi_bus,
         std::function<bool(bool)> spi_select,
         std::function<bool(bool)> pwr_enable,
         int tx_ready_mcu_pin = PIN_INVALID,
         int tx_ready_gps_pin = PIN_INVALID);
+
+    /**
+     * @brief Construct ubloxGPS driver for i2c bus
+     * 
+     */
+    ubloxGPS(TwoWire &i2c_bus,
+        std::function<bool(bool)> pwr_enable);
 
     gps_t nmea_gps;
 
@@ -820,9 +827,10 @@ protected:
     bool checkWaitingForAckOrRspFlags() const;
 
 private:
-    SPIClass *spi = NULL;
+    SPIClass *spi_bus = NULL;
     __SPISettings spi_settings;
     USARTSerial *serial = NULL;
+    TwoWire *i2c_bus = NULL;
     std::function<bool(bool)> spi_select = NULL;
     std::function<bool(bool)> pwr_enable = NULL;
     int tx_ready_mcu_pin = PIN_INVALID;
