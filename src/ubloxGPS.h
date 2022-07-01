@@ -22,6 +22,7 @@
 const uint16_t UBX_RX_MSG_MAX_LEN = 512;
 const uint16_t UBX_LOG_STRING_MAX_LEN = 256;
 const size_t UBX_MGA_FLASH_DATA_MAX_LEN = 512;
+const size_t UBX_RX_CHANNELS = 72;
 
 typedef enum {
     UBX_CLASS_NAV      = 0x01,  // Navigation Results Messages: Position, Speed, Time, Acceleration, Heading, DOP, SVs used
@@ -670,6 +671,106 @@ enum class ubloxGpsLockMethod {
     HorizontalDop,
 };
 
+typedef union {
+    struct __attribute__((packed)) {
+        uint32_t qualityInd     : 3;    // 2:0
+        uint32_t svUsed         : 1;    // 3
+        uint32_t health         : 2;    // 5:4
+        uint32_t diffCorr       : 1;    // 6
+        uint32_t smoothed       : 1;    // 7
+        uint32_t orbitSrc       : 3;    // 10:8
+        uint32_t ephAvail       : 1;    // 11
+        uint32_t almAvail       : 1;    // 12
+        uint32_t anoAvail       : 1;    // 13
+        uint32_t aopAvail       : 1;    // 14
+        uint32_t reserved1      : 1;    // 15
+        uint32_t sbasCorrUsed   : 1;    // 16
+        uint32_t rtcmCorrUsed   : 1;    // 17
+        uint32_t slasCorrUsed   : 1;    // 18
+        uint32_t reserved2      : 1;    // 19
+        uint32_t prCorrUsed     : 1;    // 20
+        uint32_t crCorrUsed     : 1;    // 21
+        uint32_t doCorrUsed     : 1;    // 22
+        uint32_t reserved3      : 9;    // 23:32
+    } fields;
+    uint8_t bytes[4];
+} ubx_nav_sat_flags_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t             gnssID;
+    uint8_t             svID;
+    uint8_t             cno;
+    int8_t              elev;
+    int16_t             azim;
+    int16_t             prRes;
+    ubx_nav_sat_flags_t flags;
+} ubx_nav_sat_sv_t;
+
+typedef union {
+    struct __attribute__((packed)) {
+        uint32_t            iTOW;
+        uint8_t             version;
+        uint8_t             numSvs;
+        uint8_t             reserved1[2];
+        ubx_nav_sat_sv_t    sats[UBX_RX_CHANNELS/2];    // Can't use 72 here, as it would overrun the 512 byte message buffer
+    } regs;
+    uint8_t bytes[8 + (UBX_RX_CHANNELS/2)*sizeof(ubx_nav_sat_sv_t)];
+} ubx_nav_sat_t;
+
+typedef union {
+    struct {
+        uint8_t health      : 2;
+        uint8_t visibility  : 2;
+        uint8_t reserved    : 4;
+    } flags;
+    uint8_t byte;
+} ubx_nav_orb_svflag_t;
+
+typedef union {
+    struct {
+        uint8_t ephUseability   : 5;
+        uint8_t ephSource       : 3;
+    } flags;
+    uint8_t byte;
+} ubx_nav_orb_eph_t;
+
+typedef union {
+    struct {
+        uint8_t almUsability    : 5;
+        uint8_t almSource       : 3;
+    } flags;
+    uint8_t byte;
+} ubx_nav_orb_alm_t;
+
+typedef union {
+    struct {
+        uint8_t anoAopUsability : 5;
+        uint8_t type            : 3;
+    } flags;
+    uint8_t byte;
+} ubx_nav_orb_otherorb_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t                 gnssId;
+    uint8_t                 svId;
+    ubx_nav_orb_svflag_t    svFlag;
+    ubx_nav_orb_eph_t       eph;
+    ubx_nav_orb_alm_t       alm;
+    ubx_nav_orb_otherorb_t  otherOrb;
+} ubx_nav_orb_sv_t;
+
+// TODO: add a validity flag
+typedef union {
+    struct __attribute__((packed)) {
+        uint32_t iTOW;
+        uint8_t version;
+        uint8_t numSv;
+        uint8_t reserved2[2];
+        ubx_nav_orb_sv_t sats[UBX_RX_CHANNELS];
+    } regs;
+    uint8_t bytes[8 + UBX_RX_CHANNELS*sizeof(ubx_nav_orb_sv_t)];
+} ubx_nav_orb_t;
+
 typedef struct {
     uint8_t ref;
     int8_t leapSecs;
@@ -861,6 +962,7 @@ public:
     uint32_t getTime(void);
     uint32_t getUTCTime();
     uint8_t  getSatellites(void);
+    void getSatellitesDesc(gps_sat_t sat_arr[12]);
 
     /**
      * @brief Get the geoid height
@@ -926,6 +1028,8 @@ public:
     bool  setRate(uint16_t measRateHz);
     bool  updateEsfStatus(void);
     bool  getEsfStatus(ubx_esf_status_t &esf);
+    bool  getSatelliteInfo(ubx_nav_sat_t &sats);
+    bool  getOrbitDB(ubx_nav_orb_t &orb);
     bool  resetOdometer(void);
     bool  updateOdometer(void);
     bool  getOdometer(ubx_nav_odo_t &odo);
@@ -1077,6 +1181,9 @@ private:
     ubx_esf_status_t esf_status;
     ubx_nav_odo_t    nav_odo;
     ubx_nav_aopstatus_t nav_aopstatus;
+    ubx_nav_sat_t nav_sat;
+    ubx_nav_orb_t nav_orb;
+
     ubx_mon_ver_t    mon_ver;
     ubx_dynamic_model_t cfg_dyn_model; // Model read from device
 
