@@ -430,6 +430,8 @@ int ubloxGPS::setOn(lib_config_t &config)
     CHECK_TRUE(configMsg(UBX_CLASS_ESF, UBX_ESF_STATUS, 10), SYSTEM_ERROR_IO); // TODO: Once ESF is good maybe we can slow this down.
     CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_AOPSTATUS, 30), SYSTEM_ERROR_IO);
     CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_ODO, 5), SYSTEM_ERROR_IO);
+    CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_SAT, 5), SYSTEM_ERROR_IO);
+    CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_ORB, 5), SYSTEM_ERROR_IO);
 
     CHECK_TRUE(setGNSS(config.support_gnss), SYSTEM_ERROR_IO);
     CHECK_TRUE(setPower((ubx_power_mode_t)config.power_mode), SYSTEM_ERROR_IO);
@@ -608,6 +610,13 @@ uint8_t ubloxGPS::getSatellites(void)
     return nmea_gps.sats_in_use;
 }
 
+void ubloxGPS::getSatellitesDesc(gps_sat_t sat_arr[12])
+{
+    if (sat_arr != NULL) {
+        memcpy(sat_arr, nmea_gps.sats_in_view_desc, sizeof(nmea_gps.sats_in_view_desc));
+    }
+}
+
 double ubloxGPS::getGeoIdHeight(void)
 {
     //the geoid's variation ranges from +85 m (Iceland) to −106 m (southern India)
@@ -770,6 +779,26 @@ void ubloxGPS::processUBX()
         nav_aopstatus.aopCfg    = ubx_rx_msg.ubx_msg[4];
         nav_aopstatus.aopStatus = ubx_rx_msg.ubx_msg[5];
         Loglib.info("AOPSTATUS: iTOW:%lums, aopCfg:%u, aopStatus:%u", nav_aopstatus.iTOW, nav_aopstatus.aopCfg, nav_aopstatus.aopStatus);
+    } else if (ubx_rx_msg.msg_class == UBX_CLASS_NAV && ubx_rx_msg.msg_id == UBX_NAV_SAT ) {
+        memcpy(nav_sat.bytes, ubx_rx_msg.ubx_msg, sizeof(ubx_nav_sat_t));
+        Loglib.info("UBX_NAV_SAT: %u sats in view", nav_sat.regs.numSvs);
+        for (auto sv : nav_sat.regs.sats) {
+            Loglib.trace("\tSatellite: {used: %c, num: %*u, snr: %*u, qualInd: %u, health: %u, ephAv: %c, almAv: %c, anoAv: %c, aopAv: %c}", 
+                sv.flags.fields.svUsed ? 'Y' : 'N', 3, sv.svID, 3, sv.cno, sv.flags.fields.qualityInd, sv.flags.fields.health, 
+                sv.flags.fields.ephAvail ? 'Y' : 'N', sv.flags.fields.almAvail ? 'Y' : 'N', sv.flags.fields.anoAvail ? 'Y' : 'N',
+                sv.flags.fields.aopAvail ? 'Y' : 'N');
+        }
+    } else if (ubx_rx_msg.msg_class == UBX_CLASS_NAV && ubx_rx_msg.msg_id == UBX_NAV_ORB ) {
+        memcpy(nav_orb.bytes, ubx_rx_msg.ubx_msg, sizeof(ubx_nav_orb_t));
+        Loglib.info("UBX_NAV_ORB: %u sats in almanac", nav_orb.regs.numSv);
+        for (auto sv : nav_orb.regs.sats) {
+            Loglib.trace("\tOrbit: {num: %*u, health: %u, viz: %u, ephUse: %u, ephSrc: %u, almUse: %u, almSrc: %u, aopUse: %u, orbTyp: %u}", 
+                3, sv.svId, 
+                sv.svFlag.flags.health, sv.svFlag.flags.visibility, 
+                sv.eph.flags.ephUseability, sv.eph.flags.ephSource,
+                sv.alm.flags.almUsability, sv.alm.flags.almSource,
+                sv.otherOrb.flags.anoAopUsability, sv.otherOrb.flags.type);
+        }
     } else if (ubx_rx_msg.msg_class == UBX_CLASS_MON && ubx_rx_msg.msg_id == UBX_MON_VER ) {
         free(mon_ver.sw_version);
         free(mon_ver.hw_version);
@@ -1077,6 +1106,18 @@ bool ubloxGPS::getEsfStatus(ubx_esf_status_t &esf)
     LOCK();
     memcpy(&esf, &esf_status, sizeof(ubx_esf_status_t));
     return esf_status.valid;
+}
+
+bool ubloxGPS::getSatelliteInfo(ubx_nav_sat_t &sats) {
+    LOCK();
+    memcpy(&sats, &nav_sat, sizeof(ubx_nav_sat_t));
+    return true;
+}
+
+bool ubloxGPS::getOrbitDB(ubx_nav_orb_t &orb) {
+    LOCK();
+    memcpy(&orb, &nav_orb, sizeof(ubx_nav_orb_t));
+    return true;
 }
 
 bool ubloxGPS::resetOdometer(void)
