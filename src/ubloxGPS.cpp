@@ -65,6 +65,11 @@ static int nmea_uptime_wrapper()
     return System.uptime();
 }
 
+template <typename T>
+T clip(const T& n, const T& lower, const T& upper) {
+  return std::max(lower, std::min(n, upper));
+}
+
 static void nmea_event_log_cb(gps_t* gh, gps_statement_t res)
 {
     if(res != STAT_CHECKSUM_FAIL)
@@ -1174,6 +1179,128 @@ bool ubloxGPS::setGNSS(uint8_t gnssMask)
         if(log_enabled) Loglib.info("enable GLONASS");
     }
 
+    return requestSendUBX(sentences, sentences[2] + 4);
+}
+bool ubloxGPS::setUDREnable(bool useUDR)
+{
+    LOCK();
+    uint8_t sentences[44] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_CFG;
+    sentences[1] = (uint8_t)UBX_CFG_NAVX5;
+    sentences[2] = 40;
+    sentences[3] = 0x00;
+    
+    // Payload
+    sentences[4] = 0x02; // version LSB = 0x02
+    sentences[5] = 0x00; // version MSB = 0x00
+    
+    uint32_t mask2 = (1 << 6);  // Update ADR/UDR setting only
+    sentences[8]  = (mask2 & 0xFF);         // mask2 LLSB
+    sentences[9]  = ((mask2 >> 8) & 0xFF);  // mask2 LMSB
+    sentences[10] = ((mask2 >> 16) & 0xFF); // mask2 MLSB
+    sentences[11] = ((mask2 >> 24) & 0xFF); // mask2 MMSB
+
+    sentences[43] = useUDR ? 0x01 : 0x00; // useUdr
+
+    // other item not apply, so keep 0
+    if(log_enabled) Loglib.info("set UDR Enable {useUDR: %s}", 
+        useUDR ? "true" : "false");
+    return requestSendUBX(sentences, sentences[2] + 4);
+}
+
+bool ubloxGPS::setIMUAutoAlignment(bool enable)
+{
+    LOCK();
+    uint8_t sentences[16] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_CFG;
+    sentences[1] = (uint8_t)UBX_CFG_ESFALG;
+    sentences[2] = 12;
+    sentences[3] = 0x00;
+    
+    // uint32_t bitfield
+    sentences[4] = 0x00; // bit7 - version (0x0)
+    sentences[5] = enable ? 0x01: 0x00; // bit8 - 0=use manual mount angles, 1=use automatic calibration
+    sentences[6] = 0x00;
+    sentences[7] = 0x00;
+
+    // other item not apply, so keep 0
+    if(log_enabled) Loglib.info("set IMU Automatic Alignment = %s", enable ? "true" : "false");
+    return requestSendUBX(sentences, sentences[2] + 4);
+}
+
+bool ubloxGPS::setIMUAlignmentAngles(double yaw_angle_deg, double pitch_angle_deg, double roll_angle_deg)
+{
+    // Clip the inputs to the range the registers can take
+    yaw_angle_deg   = clip(yaw_angle_deg,     0.0, 360.0);
+    pitch_angle_deg = clip(pitch_angle_deg, -90.0,  90.0);
+    roll_angle_deg  = clip(roll_angle_deg, -180.0, 180.0);
+
+    LOCK();
+    uint8_t sentences[16] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_CFG;
+    sentences[1] = (uint8_t)UBX_CFG_ESFALG;
+    sentences[2] = 12;
+    sentences[3] = 0x00;
+    
+    // uint32_t bitfield
+    sentences[4] = 0x00; // bit7 - version (0x0)
+    sentences[5] = 0x00; // bit8 - 0=use manual mount angles, 1=use automatic calibration
+    sentences[6] = 0x00;
+    sentences[7] = 0x00;
+
+    // yaw [0, 36000], 1e-2 scaling
+    modf(yaw_angle_deg * 100, &yaw_angle_deg);
+    uint32_t yaw_bytes = (uint32_t)yaw_angle_deg;
+    sentences[8]  = (yaw_bytes & 0xFF);
+    sentences[9]  = ((yaw_bytes >> 8)  & 0xFF);
+    sentences[10] = ((yaw_bytes >> 16) & 0xFF);
+    sentences[11] = ((yaw_bytes >> 24) & 0xFF);
+
+    // pitch [-9000, 9000], 1e-2 scaling
+    int16_t pitch_bytes;
+    modf(pitch_angle_deg * 100, &pitch_angle_deg);
+    pitch_bytes = (int16_t)pitch_angle_deg;
+    sentences[12]  = (pitch_bytes & 0xFF);
+    sentences[13]  = ((pitch_bytes >> 8) & 0xFF);
+
+    // roll [-18000, 18000], 1e-2 scaling
+    int16_t roll_bytes;
+    modf(roll_angle_deg * 100, &roll_angle_deg);
+    roll_bytes = (int16_t)roll_angle_deg;
+    sentences[14]  = (roll_bytes & 0xFF);
+    sentences[15]  = ((roll_bytes >> 8) & 0xFF);
+
+    // other item not apply, so keep 0
+    if(log_enabled) Loglib.info("set IMU alignment angles {yaw: %0.0f, pitch: %0.0f, roll: %0.0f}", yaw_angle_deg, pitch_angle_deg, roll_angle_deg);
+    return requestSendUBX(sentences, sentences[2] + 4);
+}
+
+bool ubloxGPS::setIMUtoVRP(int16_t x, int16_t y, int16_t z)
+{
+    LOCK();
+    uint8_t sentences[16] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_CFG;
+    sentences[1] = (uint8_t)UBX_CFG_ESFLA;
+    sentences[2] = 12;  // 4 + 8*numConfigs (which is 1 in this case)
+    sentences[3] = 0x00;
+    
+    // uint32_t bitfield
+    sentences[4] = 0x00; // message version (0x0)
+    sentences[5] = 0x01; // numConfigs (1)
+    sentences[6] = 0x00; // reserved1
+    sentences[7] = 0x00; // reserved1
+
+    // Lever arm configuration 1(
+    sentences[8]  = static_cast<uint8_t>(UBX_LEVER_ARM_IMU_TO_VRP); // Lever arm type
+    sentences[9]  = 0x00;               // reserved2
+    sentences[10] = (x & 0xFF);         // Lever arm X LSB
+    sentences[11] = ((x >> 8) & 0xFF);  // Lever arm X MSB
+    sentences[12] = (y & 0xFF);         // Lever arm Y LSB
+    sentences[13] = ((y >> 8) & 0xFF);  // Lever arm Y MSB
+    sentences[14] = (z & 0xFF);         // Lever arm Z LSB
+    sentences[15] = ((z >> 8) & 0xFF);  // Lever arm Z MSB
+
+    if(log_enabled) Loglib.info("set IMU to VRP Lever Arm (cm) {x: %i, y: %i, z: %i}", x, y, z);
     return requestSendUBX(sentences, sentences[2] + 4);
 }
 

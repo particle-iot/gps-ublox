@@ -219,6 +219,15 @@ typedef enum {
     UBX_DYNAMIC_MODEL_BIKE         = 10,
 } ubx_dynamic_model_t;
 
+// For UBX_CFG_ESFLA Lever Arm Configuration
+typedef enum {
+    UBX_LEVER_ARM_VRP_TO_ANT   = 0,
+    UBX_LEVER_ARM_VRP_TO_IMU   = 1,
+    UBX_LEVER_ARM_IMU_TO_ANT   = 2,
+    UBX_LEVER_ARM_IMU_TO_VRP   = 3,
+    UBX_LEVER_ARM_IMU_TO_CRP   = 4
+} ubx_lever_arm_t;
+
 typedef enum {
     UBX_BAUDRATE_DEFAULT = 9600,
     UBX_BAUDRATE_4800    = 4800,
@@ -861,6 +870,10 @@ public:
     bool  updateVersion(void);
     bool  getVersion(String& swVersion, String& hwVersion, String& extVersion);
     bool  setGNSS(uint8_t gnssMask);
+    bool  setUDREnable(bool useUDR);
+    bool  setIMUAutoAlignment(bool enable);
+    bool  setIMUAlignmentAngles(double yaw_angle_deg, double pitch_angle_deg, double roll_angle_deg);
+    bool  setIMUtoVRP(int16_t x, int16_t y, int16_t z);
     bool  setMode(ubx_dynamic_model_t dynModel);
 
     /**
