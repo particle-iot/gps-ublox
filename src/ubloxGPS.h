@@ -81,6 +81,7 @@ typedef enum {
     UBX_CFG_ESFALG           = 0x56, // Accelerometer sensor misalignment configuration
     UBX_CFG_ESFA             = 0x4C, // Accelerometer sensor configuration
     UBX_CFG_ESFLA            = 0x2F, // Lever-arm configuration
+    UBX_UPD_SOS              = 0x14, // System restored from backup
     UBX_ESF_INS              = 0x15, // Vehicle dynamics information
     UBX_ESF_MEAS             = 0x02, // External Sensor Fusion Measurements
     UBX_ESF_RAW              = 0x03, // Raw sensor measurements
@@ -127,6 +128,7 @@ typedef enum {
     UBX_PUBX_RATE            = 0x40, // Set NMEA message output rate
     UBX_PUBX_SVSTATUS        = 0x03, // Satellite Status
     UBX_PUBX_TIME            = 0x04, // Time of Day and Clock information
+    UBX_MGA_INI_TIME_UTC     = 0x40, // Initial Time Assistance
     UBX_ID_INVALID           = 0xFF
 } ubx_msg_id_t;
 
@@ -227,6 +229,46 @@ typedef enum {
     UBX_LEVER_ARM_IMU_TO_VRP   = 3,
     UBX_LEVER_ARM_IMU_TO_CRP   = 4
 } ubx_lever_arm_t;
+
+typedef enum {
+    UBX_CONFIG_MASK_NONE        = 0,            // No action
+    UBX_CONFIG_MASK_IOPORT      = (1 << 0),     // Port and USB settings
+    UBX_CONFIG_MASK_MSG         = (1 << 1),     // Message settings (enable/disable, update rate)
+    UBX_CONFIG_MASK_INF_MSG     = (1 << 2),     // Information output settings (Errors, warnings, notice, test, etc)
+    UBX_CONFIG_MASK_NAV         = (1 << 3),     // Settings for navigation parameters, ADR
+    UBX_CONFIG_MASK_RX_MGR      = (1 << 4),     // GNSS settings, power, time puilse, jamming/interference
+    UBX_CONFIG_MASK_SENS_IFACE  = (1 << 8),     // Sensor interface config for ADR and UDR
+    UBX_CONFIG_MASK_REM_INV     = (1 << 9),     // Remote inventory
+    UBX_CONFIG_MASK_ANT         = (1 << 10),    // Antenna
+    UBX_CONFIG_MASK_LOG         = (1 << 11)     // Logging
+} ubx_config_mask_t;
+
+typedef enum {
+    UBX_RESET_MASK_HOT_START  = 0x0000, // Don't clear anything
+    UBX_RESET_MASK_WARM_START = 0x0001, // Clear ephemeris only
+    UBX_RESET_MASK_COLD_START = 0xFFFF  // Clear everything
+} ubx_reset_nav_bbr_mask_t;
+
+typedef enum {
+    UBX_RESET_MODE_HW                       = 0x00,
+    UBX_RESET_MODE_CONTROLLED_SW            = 0x01,
+    UBX_RESET_MODE_CONTROLLED_SW_GNSS_ONLY  = 0x02,
+    UBX_RESET_MODE_HW_AFTER_SHUTDOWN        = 0x04,
+    UBX_RESET_MODE_CONTROLLED_GNSS_STOP     = 0x08,
+    UBX_RESET_MODE_CONTROLLED_GNSS_START    = 0x09
+} ubx_reset_mode_t;
+
+typedef enum {
+    UBX_UPD_SOS_CREATE_NAK = 0,
+    UBX_UPD_SOS_CREATE_ACK  = 1
+} ubx_upd_sos_create_resp_t;
+
+typedef enum {
+    UBX_UPD_SOS_RESTORE_UNKNOWN = 0,
+    UBX_UPD_SOS_RESTORE_FAILED  = 1,
+    UBX_UPD_SOS_RESTORE_SUCCESS = 2,
+    UBX_UPD_SOS_RESTORE_NONE    = 3,
+} ubx_upd_sos_restore_resp_t;
 
 typedef enum {
     UBX_BAUDRATE_DEFAULT = 9600,
@@ -359,6 +401,13 @@ struct ubx_esf_status_t {
     uint8_t freq[12];
     uint8_t faults[12];
     bool    valid;
+};
+
+struct ubx_nav_aopstatus_t {
+    uint32_t iTOW;          // ms, GPS time of week of the navigation epoch.
+    uint8_t  aopCfg;        // is AOP enabled for not?
+    uint8_t  aopStatus;     // is AOP running?
+    bool     valid;
 };
 
 struct  ubx_nav_odo_t {
@@ -621,6 +670,20 @@ enum class ubloxGpsLockMethod {
     HorizontalDop,
 };
 
+typedef struct {
+    uint8_t ref;
+    int8_t leapSecs;
+    uint16_t year;
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t minute;
+    uint8_t second;
+    uint32_t ns;
+    uint16_t tAccS;
+    uint32_t tAccNs;
+} ubx_mga_init_time_utc_t;
+
 class ubloxGPS
 {
 
@@ -863,10 +926,10 @@ public:
     bool  setRate(uint16_t measRateHz);
     bool  updateEsfStatus(void);
     bool  getEsfStatus(ubx_esf_status_t &esf);
-    bool  setReset(void);
     bool  resetOdometer(void);
     bool  updateOdometer(void);
     bool  getOdometer(ubx_nav_odo_t &odo);
+    bool  updateAopStatus(void);
     bool  updateVersion(void);
     bool  getVersion(String& swVersion, String& hwVersion, String& extVersion);
     bool  setGNSS(uint8_t gnssMask);
@@ -874,6 +937,12 @@ public:
     bool  setIMUAutoAlignment(bool enable);
     bool  setIMUAlignmentAngles(double yaw_angle_deg, double pitch_angle_deg, double roll_angle_deg);
     bool  setIMUtoVRP(int16_t x, int16_t y, int16_t z);
+    bool  setAOPSettings(bool useAop, uint16_t aopOrbMaxErr = 0);
+    bool  setConfigClearSaveLoad(uint32_t clear, uint32_t save, uint32_t load);
+    bool  setReset(ubx_reset_nav_bbr_mask_t navBbrMask, ubx_reset_mode_t resetMode);
+    bool  createBackup(void);
+    bool  saveOnShutdown(void);
+    bool  setTime(ubx_mga_init_time_utc_t timeAssist);
     bool  setMode(ubx_dynamic_model_t dynModel);
 
     /**
@@ -1007,6 +1076,7 @@ private:
     uint32_t last_receive_time;
     ubx_esf_status_t esf_status;
     ubx_nav_odo_t    nav_odo;
+    ubx_nav_aopstatus_t nav_aopstatus;
     ubx_mon_ver_t    mon_ver;
     ubx_dynamic_model_t cfg_dyn_model; // Model read from device
 
@@ -1110,6 +1180,9 @@ private:
     time_t stabilityWindowLastTimestamp;
     bool isStable;
     uint32_t startLockUptime;
+
+    bool saveOnShutdownACK;
+    ubx_upd_sos_restore_resp_t restoreStatus;
 };
 
 #endif /* __UBLOXGPS_H */

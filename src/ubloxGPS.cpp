@@ -110,6 +110,7 @@ ubloxGPS::ubloxGPS(USARTSerial &serial,
     last_receive_time(0),
     esf_status({}),
     nav_odo({}),
+    nav_aopstatus({}),
     mon_ver({}),
     cfg_dyn_model(UBX_DEFAULT_MODEL),
 
@@ -156,6 +157,7 @@ ubloxGPS::ubloxGPS(SPIClass &spi,
     last_receive_time(0),
     esf_status({}),
     nav_odo({}),
+    nav_aopstatus({}),
     mon_ver({}),
     cfg_dyn_model(UBX_DEFAULT_MODEL),
 
@@ -426,6 +428,7 @@ int ubloxGPS::setOn(lib_config_t &config)
     }
 
     CHECK_TRUE(configMsg(UBX_CLASS_ESF, UBX_ESF_STATUS, 10), SYSTEM_ERROR_IO); // TODO: Once ESF is good maybe we can slow this down.
+    CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_AOPSTATUS, 30), SYSTEM_ERROR_IO);
     CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_ODO, 5), SYSTEM_ERROR_IO);
 
     CHECK_TRUE(setGNSS(config.support_gnss), SYSTEM_ERROR_IO);
@@ -756,6 +759,17 @@ void ubloxGPS::processUBX()
             nav_odo.distanceStd   |= ubx_rx_msg.ubx_msg[16 + i] << (8 * i);
         }
         // Loglib.info("ODO: iTOW:%lums dis:%lum total:%lum std:%lum", nav_odo.iTOW, nav_odo.distance, nav_odo.totalDistance, nav_odo.distanceStd);
+    } else if (ubx_rx_msg.msg_class == UBX_CLASS_NAV && ubx_rx_msg.msg_id == UBX_NAV_AOPSTATUS ) {
+        nav_aopstatus.valid = true;
+        nav_aopstatus.iTOW = 0;
+        nav_aopstatus.aopCfg = 0;
+        nav_aopstatus.aopStatus = 0;
+        for (int i = 0; i < 4; i++) {
+            nav_aopstatus.iTOW |= ubx_rx_msg.ubx_msg[i] << (8 * i);
+        }
+        nav_aopstatus.aopCfg    = ubx_rx_msg.ubx_msg[4];
+        nav_aopstatus.aopStatus = ubx_rx_msg.ubx_msg[5];
+        Loglib.info("AOPSTATUS: iTOW:%lums, aopCfg:%u, aopStatus:%u", nav_aopstatus.iTOW, nav_aopstatus.aopCfg, nav_aopstatus.aopStatus);
     } else if (ubx_rx_msg.msg_class == UBX_CLASS_MON && ubx_rx_msg.msg_id == UBX_MON_VER ) {
         free(mon_ver.sw_version);
         free(mon_ver.hw_version);
@@ -784,11 +798,61 @@ void ubloxGPS::processUBX()
             mon_ver.extension[str_ext.length()-1] = '\0';
         }
         mon_ver.valid = true;
-    }  else if (ubx_rx_msg.msg_class == UBX_CLASS_CFG && ubx_rx_msg.msg_id == UBX_CFG_NAV5 ) {
+    } else if (ubx_rx_msg.msg_class == UBX_CLASS_CFG && ubx_rx_msg.msg_id == UBX_CFG_NAV5 ) {
         cfg_dyn_model = static_cast<ubx_dynamic_model_t>(ubx_rx_msg.ubx_msg[2] + ubx_rx_msg.ubx_msg[3] * 256);
 
         Log.info("==== UBX CFG NAV5 ====");
         Log.info("dynModel :%d", (int)cfg_dyn_model);
+    } else if (ubx_rx_msg.msg_class == UBX_CLASS_UPD && ubx_rx_msg.msg_id == UBX_UPD_SOS ) {
+        // Loglib.info("=== UBX UPD SOS ===");
+        switch(ubx_rx_msg.ubx_msg[0]) {
+            // Backup creation acknowledge message
+            case 2: {
+                switch((ubx_upd_sos_create_resp_t)ubx_rx_msg.ubx_msg[4]) {
+                    case UBX_UPD_SOS_CREATE_ACK: {
+                        Loglib.info("Save on Shutdown: Backup creation SUCCESS");
+                        // TOOD: now safe to sleep!
+                        saveOnShutdownACK = true;
+                        break;
+                    }
+                    case UBX_UPD_SOS_CREATE_NAK: {
+                        Loglib.warn("Save on Shutdown: Backup creation FAILED");
+                        // TODO: unsafe to sleep!
+                        saveOnShutdownACK = false;
+                        break;
+                    }
+                }
+                break;
+            }
+            
+            // System restored from backup message
+            case 3: {
+                restoreStatus = (ubx_upd_sos_restore_resp_t)ubx_rx_msg.ubx_msg[4];
+                static const char * sos_restore_msgs[] = {
+                    "UNKNOWN",
+                    "FAILURE",
+                    "SUCCESS",
+                    "No backups"
+                };
+                static const char * sos_restore_prefix = "Save on Shutdown backup restore: ";
+                switch(restoreStatus) {
+                    case UBX_UPD_SOS_RESTORE_UNKNOWN:
+                    case UBX_UPD_SOS_RESTORE_FAILED:
+                    {
+                        Loglib.warn("%s%s",sos_restore_prefix, sos_restore_msgs[restoreStatus]);
+                        break;
+                    }
+                    case UBX_UPD_SOS_RESTORE_SUCCESS:
+                    case UBX_UPD_SOS_RESTORE_NONE: {
+                        Loglib.info("%s%s",sos_restore_prefix, sos_restore_msgs[restoreStatus]);
+                        break;
+                    }
+                }
+                break;
+            }
+
+            default: break;
+        }
     }
 }
 
@@ -1015,14 +1079,6 @@ bool ubloxGPS::getEsfStatus(ubx_esf_status_t &esf)
     return esf_status.valid;
 }
 
-bool ubloxGPS::setReset(void)
-{
-    // Hard coded currently to: Cold start, hardware reset (watchdog) immediately
-    LOCK();
-    uint8_t sentences[8] = { (uint8_t)UBX_CLASS_CFG, (uint8_t)UBX_CFG_RST, 0x04, 0x00, 0xff, 0xff, 0x00, 0x00 };
-    return requestSendUBX(sentences, 8);
-}
-
 bool ubloxGPS::resetOdometer(void)
 {
     // Reset the traveled distance computed by the odometer
@@ -1046,6 +1102,15 @@ bool ubloxGPS::getOdometer(ubx_nav_odo_t &odo)
     LOCK();
     memcpy(&odo, &nav_odo, sizeof(ubx_nav_odo_t));
     return nav_odo.valid;
+}
+
+bool ubloxGPS::updateAopStatus(void)
+{
+    LOCK();
+    // invalidate AOP status local storage when forcing a poll request to know when data has updated from decode()
+    nav_aopstatus.valid = false;
+    uint8_t sentences[4] = { (uint8_t)UBX_CLASS_NAV, (uint8_t)UBX_NAV_AOPSTATUS, 0x00, 0x00 };
+    return requestSendUBX(sentences, 4);
 }
 
 bool ubloxGPS::updateVersion(void)
@@ -1301,6 +1366,164 @@ bool ubloxGPS::setIMUtoVRP(int16_t x, int16_t y, int16_t z)
     sentences[15] = ((z >> 8) & 0xFF);  // Lever arm Z MSB
 
     if(log_enabled) Loglib.info("set IMU to VRP Lever Arm (cm) {x: %i, y: %i, z: %i}", x, y, z);
+    return requestSendUBX(sentences, sentences[2] + 4);
+}
+
+bool ubloxGPS::setAOPSettings(bool useAop, uint16_t aopOrbMaxErr)
+{
+    LOCK();
+    uint8_t sentences[48] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_CFG;
+    sentences[1] = (uint8_t)UBX_CFG_NAVX5;
+    sentences[2] = 44;
+    sentences[3] = 0x00;
+    
+    // Payload
+    sentences[4] = 0x03; // version LSB = 0x02
+    sentences[5] = 0x00; // version MSB = 0x00
+    
+    uint16_t mask1 = (1 << 14); // Update assist now settings (aopCfg, aopOrbMaxErr) only
+    sentences[6] = (mask1 & 0xFF);          // mask1 LSB
+    sentences[7] = ((mask1 >> 8) & 0xFF);   // mask1 MSB
+
+    sentences[31] = useAop ? 0x01 : 0x00;   // aopCfg: Assist Now Autonomous enable
+
+    if (aopOrbMaxErr != 0) {
+        // If we're not using the FW default value...
+        if      (aopOrbMaxErr < 5)      aopOrbMaxErr = 5;
+        else if (aopOrbMaxErr > 1000)   aopOrbMaxErr = 1000;
+        sentences[34] = (aopOrbMaxErr & 0xFF);          // aopOrbMaxErr LSB
+        sentences[35] = ((aopOrbMaxErr >> 8) & 0xFF);   // aopOrbMaxErr MSB
+    } // else '0' means use FW default (100)
+
+    // other item not apply, so keep 0
+    if(log_enabled) Loglib.info("set AOP Settings {aopCfg: %s, aopOrbMaxErr: %u}", 
+        useAop ? "true" : "false", 
+        aopOrbMaxErr);
+    return requestSendUBX(sentences, sentences[2] + 4);
+}
+
+bool ubloxGPS::setConfigClearSaveLoad(uint32_t clear, uint32_t save, uint32_t load)
+{
+    // Proper masking for registers
+    clear &= 0x00001F1F;
+    save  &= 0x00001F1F;
+    load  &= 0x00001F1F;
+
+    LOCK();
+    uint8_t sentences[16] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_CFG;
+    sentences[1] = (uint8_t)UBX_CFG_CFG;
+    sentences[2] = 12;
+    sentences[3] = 0x00;
+    
+    // Payload, all uint32_t's
+    *(uint32_t*)(&sentences[4])  = clear;
+    *(uint32_t*)(&sentences[8])  =  save;
+    *(uint32_t*)(&sentences[12]) =  load;
+
+    if(log_enabled) Loglib.info("setConfig: {clear: %04X, save: %04X, load: %04X}", (uint16_t)clear, (uint16_t)save, (uint16_t)load);
+    return requestSendUBX(sentences, sentences[2] + 4);
+}
+
+bool ubloxGPS::setReset(ubx_reset_nav_bbr_mask_t navBbrMask, ubx_reset_mode_t resetMode)
+{
+    LOCK();
+    uint8_t sentences[8] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_CFG;
+    sentences[1] = (uint8_t)UBX_CFG_RST;
+    sentences[2] = 8;
+    sentences[3] = 0x00;
+    
+    // Payload
+    sentences[4] = (uint8_t)(navBbrMask & 0xFF);
+    sentences[5] = (uint8_t)((navBbrMask >> 8) & 0xFF);
+    *(uint8_t*)(&sentences[6])  = (uint8_t)resetMode;
+
+    if(log_enabled) Loglib.trace("setReset: {navBbrMask: %04X, resetMode: %02X}", (uint16_t)navBbrMask, (uint8_t)resetMode);
+    return requestSendUBX(sentences, sentences[2] + 4);
+}
+
+bool ubloxGPS::createBackup(void)
+{
+    LOCK();
+    uint8_t sentences[8] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_UPD;
+    sentences[1] = (uint8_t)UBX_UPD_SOS;
+    sentences[2] = 4;
+    sentences[3] = 0x00;
+
+    sentences[4] = 0;   // command to save backup
+    // sentences [5:7] is reserved
+
+    if(log_enabled) Loglib.trace("createBackup()");
+    return requestSendUBX(sentences, sentences[2] + 4);
+}
+
+bool ubloxGPS::saveOnShutdown(void)
+{
+    saveOnShutdownACK = false;
+    if (!setReset(UBX_RESET_MASK_HOT_START, UBX_RESET_MODE_CONTROLLED_GNSS_STOP)) {
+        Loglib.warn("setReset() FAILED!");
+        return false;
+    }
+
+    // Write UBX_UPD_SOS_BACKUP
+    if (!createBackup()) {
+        Loglib.warn("createBackup() FAILED!");
+        return false;
+    }
+    
+    // saveOnShutdown boolean will be set when UBX_UPD_SOS message is received!
+    long unsigned int start = millis();
+    while (!saveOnShutdownACK) {
+        if (millis() - start > UBX_MSG_TIMEOUT) {   // TODO: check to make sure this timeout period is appropriate. Emprically 400ms is enough
+            // Timeout
+            Loglib.warn("saveOnShutdown ACK TIMEOUT!");
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ubloxGPS::setTime(ubx_mga_init_time_utc_t timeAssist) {
+    LOCK();
+    uint8_t sentences[28] = {0};
+    sentences[0] = (uint8_t)UBX_CLASS_MGA;
+    sentences[1] = (uint8_t)UBX_MGA_INI_TIME_UTC;
+    sentences[2] = 24;
+    sentences[3] = 0x00;
+
+    sentences[4] = 0x10; // type, fixed
+    sentences[5] = 0x00; // version, fixed
+    sentences[6] = 0x00; // source = none (time valid when message sent, inaccurate)
+    sentences[7] = 0x80; // leap seconds since 1980 (0x80 = unknown)
+    sentences[8] = timeAssist.year & 0xFF;
+    sentences[9] = (timeAssist.year >> 8) & 0xFF;
+    sentences[10] = timeAssist.month;
+    sentences[11] = timeAssist.day;
+    sentences[12] = timeAssist.hour;
+    sentences[13] = timeAssist.minute;
+    sentences[14] = timeAssist.second;
+    // sentences[15] = reserved1
+    if (timeAssist.ns > 0) {
+        sentences[16] = (uint8_t)timeAssist.ns         & 0xFF;
+        sentences[17] = (uint8_t)(timeAssist.ns >> 8)  & 0xFF;
+        sentences[18] = (uint8_t)(timeAssist.ns >> 16) & 0xFF;
+        sentences[19] = (uint8_t)(timeAssist.ns >> 24) & 0xFF;
+    }
+    sentences[20] = timeAssist.tAccS & 0xFF;
+    sentences[21] = (timeAssist.tAccS >> 8) & 0xFF;
+    // sentences[22] = reserved2
+    // sentences[23] = reserved2
+    if (timeAssist.tAccNs > 0) {
+        sentences[24] = (uint8_t)timeAssist.tAccNs         & 0xFF;
+        sentences[25] = (uint8_t)(timeAssist.tAccNs >> 8)  & 0xFF;
+        sentences[26] = (uint8_t)(timeAssist.tAccNs >> 16) & 0xFF;
+        sentences[27] = (uint8_t)(timeAssist.tAccNs >> 24) & 0xFF;
+    }
+    // other item not apply, so keep 0
+    if(log_enabled) Loglib.info("Set UTC time");
     return requestSendUBX(sentences, sentences[2] + 4);
 }
 
@@ -1604,8 +1827,8 @@ bool ubloxGPS::requestSendUBX(const uint8_t *sentences, uint16_t len)
         return false;
     }
 
-    if(sentences[0] == (uint8_t) UBX_CLASS_CFG)
-    {
+    // Configuration messages will ack, except for the RST message
+    if( (sentences[0] == (uint8_t)UBX_CLASS_CFG) && (sentences[1] != (uint8_t)UBX_CFG_RST) ) {
         flags = UBX_REQ_FLAGS_EXPECT_ACK;
     }
     return requestSendUBX((const ubx_msg_t *) sentences, len, flags);
