@@ -432,6 +432,7 @@ int ubloxGPS::setOn(lib_config_t &config)
     CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_ODO, 5), SYSTEM_ERROR_IO);
     CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_SAT, 5), SYSTEM_ERROR_IO);
     CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_ORB, 5), SYSTEM_ERROR_IO);
+	CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_STATUS, 5), SYSTEM_ERROR_IO);
 
     CHECK_TRUE(setGNSS(config.support_gnss), SYSTEM_ERROR_IO);
     CHECK_TRUE(setPower((ubx_power_mode_t)config.power_mode), SYSTEM_ERROR_IO);
@@ -799,6 +800,24 @@ void ubloxGPS::processUBX()
                 sv.alm.flags.almUsability, sv.alm.flags.almSource,
                 sv.otherOrb.flags.anoAopUsability, sv.otherOrb.flags.type);
         }
+    } else if (ubx_rx_msg.msg_class == UBX_CLASS_NAV && ubx_rx_msg.msg_id == UBX_NAV_STATUS ) {
+        nav_status.valid = true;
+        nav_status.iTOW = *(uint32_t*)(&ubx_rx_msg.ubx_msg[0]);
+        nav_status.gpsFix = ubx_rx_msg.ubx_msg[4];
+        nav_status.flags = ubx_rx_msg.ubx_msg[5];
+        nav_status.fixStat = ubx_rx_msg.ubx_msg[6];
+        nav_status.flags2 = ubx_rx_msg.ubx_msg[7];
+        nav_status.ttff = *(uint32_t*)(&ubx_rx_msg.ubx_msg[8]);
+        nav_status.msss = *(uint32_t*)(&ubx_rx_msg.ubx_msg[12]);
+        // Loglib.info("STATUS: iTOW:%lums gpsFix:%02X flags:%02X fixStat: %02X flags2: %02X ttff:%lums msss:%lums",
+        //     nav_status.iTOW,
+        //     nav_status.gpsFix, 
+        //     nav_status.flags & UBX_NAV_STATUS_FLAGS_MASK,
+        //     nav_status.fixStat & UBX_NAV_STATUS_FIXSTAT_MASK,
+        //     nav_status.flags2 & UBX_NAV_STATUS_FLAGS2_MASK,
+        //     nav_status.ttff,
+        //     nav_status.msss
+        // );
     } else if (ubx_rx_msg.msg_class == UBX_CLASS_MON && ubx_rx_msg.msg_id == UBX_MON_VER ) {
         free(mon_ver.sw_version);
         free(mon_ver.hw_version);
@@ -1152,6 +1171,21 @@ bool ubloxGPS::updateAopStatus(void)
     nav_aopstatus.valid = false;
     uint8_t sentences[4] = { (uint8_t)UBX_CLASS_NAV, (uint8_t)UBX_NAV_AOPSTATUS, 0x00, 0x00 };
     return requestSendUBX(sentences, 4);
+}
+
+bool ubloxGPS::updateStatus(void)
+{
+    // Polled output status registers
+    LOCK();
+    nav_status.valid = false;
+    uint8_t sentences[4] = { (uint8_t)UBX_CLASS_NAV, (uint8_t)UBX_NAV_STATUS, 0x00, 0x00 };
+    return requestSendUBX(sentences, 4);
+}
+
+bool ubloxGPS::getStatus(ubx_nav_status_t &status) {
+    LOCK();
+    memcpy(&status, &nav_status, sizeof(ubx_nav_status_t));
+    return nav_status.valid;
 }
 
 bool ubloxGPS::updateVersion(void)
