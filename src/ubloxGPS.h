@@ -360,6 +360,20 @@ struct  ubx_nav_odo_t {
     bool     valid;
 };
 
+struct ubx_nav_status_t {
+    uint32_t iTOW;          // ms, GPS time of week of the navigation epoch.
+    uint8_t  gpsFix;        // Type of GPS fix
+    uint8_t  flags;         // Navigation status flags
+        #define UBX_NAV_STATUS_FLAGS_MASK 0x0F
+    uint8_t  fixStat;       // Fix status information
+        #define UBX_NAV_STATUS_FIXSTAT_MASK 0xC3
+    uint8_t  flags2;        // More Navigation status flags
+        #define UBX_NAV_STATUS_FLAGS2_MASK 0xDB
+    uint32_t ttff;          // Time to first fix (ms)
+    uint32_t msss;          // Uptime since startup/reset (ms)
+    bool     valid;
+};
+
 struct ubx_ack_t {
     uint8_t msg_class;
     uint8_t msg_id;
@@ -858,6 +872,8 @@ public:
     bool  resetOdometer(void);
     bool  updateOdometer(void);
     bool  getOdometer(ubx_nav_odo_t &odo);
+    bool  updateStatus(void);
+    bool  getStatus(ubx_nav_status_t &status);
     bool  updateVersion(void);
     bool  getVersion(String& swVersion, String& hwVersion, String& extVersion);
     bool  setGNSS(uint8_t gnssMask);
@@ -994,6 +1010,7 @@ private:
     uint32_t last_receive_time;
     ubx_esf_status_t esf_status;
     ubx_nav_odo_t    nav_odo;
+    ubx_nav_status_t nav_status;
     ubx_mon_ver_t    mon_ver;
     ubx_dynamic_model_t cfg_dyn_model; // Model read from device
 
