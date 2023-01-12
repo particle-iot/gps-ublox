@@ -608,8 +608,7 @@ uint32_t ubloxGPS::getUTCTime()
 uint8_t ubloxGPS::getSatellites(void)
 {
     // Return the number of satellites in use.
-    // This comes from the UBX-NAV_ORB protocol message.
-    return nav_orb.regs.numSv;
+    return nmea_gps.sats_in_use;
 }
 
 uint8_t ubloxGPS::getSatellitesDesc(gps_sat_t sat_arr[])
@@ -619,8 +618,7 @@ uint8_t ubloxGPS::getSatellitesDesc(gps_sat_t sat_arr[])
     }
 
     // Return the number of satellites in view.
-    // This comes from the UBX-NAV-SAT protocol message.
-    return nav_sat.regs.numSvs;
+    return nmea_gps.sats_in_view;
 }
 
 double ubloxGPS::getGeoIdHeight(void)
