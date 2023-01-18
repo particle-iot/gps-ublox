@@ -607,14 +607,18 @@ uint32_t ubloxGPS::getUTCTime()
 
 uint8_t ubloxGPS::getSatellites(void)
 {
+    // Return the number of satellites in use.
     return nmea_gps.sats_in_use;
 }
 
-void ubloxGPS::getSatellitesDesc(gps_sat_t sat_arr[12])
+uint8_t ubloxGPS::getSatellitesDesc(gps_sat_t sat_arr[])
 {
     if (sat_arr != NULL) {
         memcpy(sat_arr, nmea_gps.sats_in_view_desc, sizeof(nmea_gps.sats_in_view_desc));
     }
+
+    // Return the number of satellites in view.
+    return nmea_gps.sats_in_view;
 }
 
 double ubloxGPS::getGeoIdHeight(void)

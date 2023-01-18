@@ -962,7 +962,7 @@ public:
     uint32_t getTime(void);
     uint32_t getUTCTime();
     uint8_t  getSatellites(void);
-    void getSatellitesDesc(gps_sat_t sat_arr[12]);
+    uint8_t  getSatellitesDesc(gps_sat_t sat_arr[]);
 
     /**
      * @brief Get the geoid height
