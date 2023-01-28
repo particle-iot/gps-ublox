@@ -130,6 +130,7 @@ typedef enum {
     UBX_PUBX_SVSTATUS        = 0x03, // Satellite Status
     UBX_PUBX_TIME            = 0x04, // Time of Day and Clock information
     UBX_MGA_INI_TIME_UTC     = 0x40, // Initial Time Assistance
+    UBX_HNR_ATT              = 0x01,
     UBX_ID_INVALID           = 0xFF
 } ubx_msg_id_t;
 
@@ -403,6 +404,18 @@ struct ubx_esf_status_t {
     uint8_t faults[12];
     bool    valid;
 };
+
+struct ubx_hnr_att_t {
+    uint32_t iTOW; // ms, GPS time of week of the HNR epoch
+    uint8_t version; // version - should be 0x01
+    uint8_t reserved[3]; // reserved
+    int32_t roll; // Vehicle roll in degree. Scaled by 1e-5
+    int32_t pitch; // Vehicle pitch in degree. Scaled by 1e-5
+    int32_t heading; // Vehicle heading in degree. Scaled by 1e-5
+    uint32_t accRoll; // Roll accuracy or null if roll angle is not available.
+    uint32_t accPitch; // Roll accuracy or null if roll angle is not available.
+    uint32_t accHeading; // Roll accuracy or null if roll angle is not available.
+} __attribute__((packed));
 
 struct ubx_nav_aopstatus_t {
     uint32_t iTOW;          // ms, GPS time of week of the navigation epoch.
@@ -785,6 +798,16 @@ typedef struct {
     uint32_t tAccNs;
 } ubx_mga_init_time_utc_t;
 
+typedef struct {
+    uint32_t timeOfWeek;
+    float roll;
+    float pitch;
+    float heading;
+    float accRoll;
+    float accPitch;
+    float accHeading;
+} ubx_attitude_t;
+
 class ubloxGPS
 {
 
@@ -814,6 +837,7 @@ public:
         int tx_ready_gps_pin = PIN_INVALID);
 
     gps_t nmea_gps;
+    ubx_attitude_t attitude;
 
     /**
      * @brief Acquires the gps lock, useful for multiple gps operations at a time
@@ -1002,6 +1026,11 @@ public:
     double   getVerticalAccuracy(void);
 
     float    getDistance(double lat1, double long1, double lat2, double long2);
+
+    /**
+     * @brief Copy the latest device orientation to output variable.
+    */
+    void getAttitude(ubx_attitude_t *o);
 
     /**
      * @brief Set new baudrate for ubloxGPS UART port

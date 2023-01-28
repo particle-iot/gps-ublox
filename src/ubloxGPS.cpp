@@ -40,6 +40,9 @@ RecursiveMutex gps_mutex;
 #define PARSE_PUBX_SVSTATUS
 #define PARSE_PUBX_TIME
 
+/* Parse HNR-ATT messages for device attitude */
+#define PARSE_HNR_ATT
+
 /* Parse UBX item define */
 //#define PARSE_UBX_XXX
 
@@ -432,6 +435,9 @@ int ubloxGPS::setOn(lib_config_t &config)
     CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_ODO, 5), SYSTEM_ERROR_IO);
     CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_SAT, 5), SYSTEM_ERROR_IO);
     CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_ORB, 5), SYSTEM_ERROR_IO);
+    #ifdef PARSE_HNR_ATT
+    CHECK_TRUE(configMsg(UBX_CLASS_HNR, UBX_HNR_ATT, 5), SYSTEM_ERROR_IO);
+    #endif
 
     CHECK_TRUE(setGNSS(config.support_gnss), SYSTEM_ERROR_IO);
     CHECK_TRUE(setPower((ubx_power_mode_t)config.power_mode), SYSTEM_ERROR_IO);
@@ -447,6 +453,11 @@ int ubloxGPS::setOn(lib_config_t &config)
     initializing = false;
     gpsStatus = GPS_STATUS_FIXING;
     return SYSTEM_ERROR_NONE;
+}
+
+void ubloxGPS::getAttitude(ubx_attitude_t *o) 
+{
+    memcpy(o, &this->attitude, sizeof(ubx_attitude_t));
 }
 
 int ubloxGPS::on(ubx_dynamic_model_t model)
@@ -886,6 +897,17 @@ void ubloxGPS::processUBX()
 
             default: break;
         }
+    } else if (ubx_rx_msg.msg_class == UBX_CLASS_HNR && ubx_rx_msg.msg_id == UBX_HNR_ATT) {
+        ubx_hnr_att_t att;
+        memcpy(&att, ubx_rx_msg.ubx_msg, sizeof(ubx_hnr_att_t));
+
+        this->attitude.timeOfWeek = att.iTOW;
+        this->attitude.roll = att.roll * 1e-5;
+        this->attitude.pitch = att.pitch * 1e-5;
+        this->attitude.heading = att.heading * 1e-5;
+        this->attitude.accRoll = att.accRoll * 1e-5;
+        this->attitude.accPitch = att.accPitch * 1e-5;
+        this->attitude.accHeading = att.accHeading * 1e-5;
     }
 }
 
