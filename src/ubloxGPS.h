@@ -83,6 +83,7 @@ typedef enum {
     UBX_CFG_ESFA             = 0x4C, // Accelerometer sensor configuration
     UBX_CFG_ESFLA            = 0x2F, // Lever-arm configuration
     UBX_UPD_SOS              = 0x14, // System restored from backup
+    UBX_ESF_ALG              = 0x14, // Accelerometer sensor configuration
     UBX_ESF_INS              = 0x15, // Vehicle dynamics information
     UBX_ESF_MEAS             = 0x02, // External Sensor Fusion Measurements
     UBX_ESF_RAW              = 0x03, // Raw sensor measurements
@@ -398,12 +399,26 @@ struct ubx_msg_t {
 struct ubx_esf_status_t {
     uint8_t fusionMode;
     uint8_t numSens;
+    uint8_t initStatus1;
+    uint8_t initStatus2;
     uint8_t sensStatus1[12];
     uint8_t sensStatus2[12];
     uint8_t freq[12];
     uint8_t faults[12];
     bool    valid;
 };
+
+// Sensor alignment information
+struct ubx_esf_alg_t {
+    uint32_t iTOW; // ms, GPS time of week of the HNR epoch
+    uint8_t version; // version - should be 0x01
+    uint8_t flags;
+    uint8_t error;
+    uint8_t reserved1;
+    uint32_t yaw;
+    int16_t pitch;
+    int16_t roll;
+} __attribute__((packed));
 
 struct ubx_hnr_att_t {
     uint32_t iTOW; // ms, GPS time of week of the HNR epoch
@@ -1077,6 +1092,7 @@ public:
     bool  saveOnShutdown(void);
     bool  setTime(ubx_mga_init_time_utc_t timeAssist);
     bool  setMode(ubx_dynamic_model_t dynModel);
+    bool  getEsfAlignmentStatus(ubx_esf_alg_t &alg);
 
     /**
      * @brief Get the dynamic model response after the request has been sent with updateMode()
@@ -1208,6 +1224,7 @@ private:
     uint8_t gpsUnit;
     uint32_t last_receive_time;
     ubx_esf_status_t esf_status;
+    ubx_esf_alg_t esf_alg;
     ubx_nav_odo_t    nav_odo;
     ubx_nav_aopstatus_t nav_aopstatus;
     ubx_nav_sat_t nav_sat;
