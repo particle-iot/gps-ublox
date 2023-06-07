@@ -40,6 +40,11 @@ RecursiveMutex gps_mutex;
 #define PARSE_PUBX_SVSTATUS
 #define PARSE_PUBX_TIME
 
+/* Parse HNR-ATT messages for device attitude */
+#define PARSE_HNR_ATT
+/* Parse ESF-ALG for IMU Alignment status */
+#define PARSE_ESF_ALG
+
 /* Parse UBX item define */
 //#define PARSE_UBX_XXX
 
@@ -432,6 +437,12 @@ int ubloxGPS::setOn(lib_config_t &config)
     CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_ODO, 5), SYSTEM_ERROR_IO);
     CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_SAT, 5), SYSTEM_ERROR_IO);
     CHECK_TRUE(configMsg(UBX_CLASS_NAV, UBX_NAV_ORB, 5), SYSTEM_ERROR_IO);
+    #ifdef PARSE_HNR_ATT
+    CHECK_TRUE(configMsg(UBX_CLASS_HNR, UBX_HNR_ATT, 5), SYSTEM_ERROR_IO);
+    #endif
+    #ifdef PARSE_ESF_ALG
+    CHECK_TRUE(configMsg(UBX_CLASS_ESF, UBX_ESF_ALG, 5), SYSTEM_ERROR_IO);
+    #endif
 
     CHECK_TRUE(setGNSS(config.support_gnss), SYSTEM_ERROR_IO);
     CHECK_TRUE(setPower((ubx_power_mode_t)config.power_mode), SYSTEM_ERROR_IO);
@@ -447,6 +458,11 @@ int ubloxGPS::setOn(lib_config_t &config)
     initializing = false;
     gpsStatus = GPS_STATUS_FIXING;
     return SYSTEM_ERROR_NONE;
+}
+
+void ubloxGPS::getAttitude(ubx_attitude_t *o)
+{
+    memcpy(o, &this->attitude, sizeof(ubx_attitude_t));
 }
 
 int ubloxGPS::on(ubx_dynamic_model_t model)
@@ -738,10 +754,16 @@ void ubloxGPS::processUBX()
         esf_status.valid = true;
         esf_status.fusionMode = ubx_rx_msg.ubx_msg[12];
         esf_status.numSens = ubx_rx_msg.ubx_msg[15];
+        esf_status.initStatus1 = ubx_rx_msg.ubx_msg[5];
+        esf_status.initStatus2 = ubx_rx_msg.ubx_msg[6];
         /*
-        Loglib.write("\r\n");
+        Loglib.info("\r\n");
         Loglib.info("UBX_ESF_STATUS[fusionMode]:%d", esf_status.fusionMode);
         Loglib.info("UBX_ESF_STATUS[sensors]   :%d", esf_status.numSens);
+        Loglib.info("UBX_ESF_STATUS[initStatus1]: wtInitStatus=%d mntAlgStatus=%d insInitStatus=%d",
+            esf_status.initStatus1 & 0x03, (esf_status.initStatus1 >> 2) & 0x07, (esf_status.initStatus1 >> 5) & 0x03);
+        Loglib.info("UBX_ESF_STATUS[initStatus2]: imuInitStatus=%d",
+            esf_status.initStatus2 & 0x03);
         */
         for (int x = 0; x < esf_status.numSens; x++) {
             esf_status.sensStatus1[x] = ubx_rx_msg.ubx_msg[16 + (x * 4)];
@@ -886,6 +908,42 @@ void ubloxGPS::processUBX()
 
             default: break;
         }
+    } else if (ubx_rx_msg.msg_class == UBX_CLASS_HNR && ubx_rx_msg.msg_id == UBX_HNR_ATT) {
+        ubx_hnr_att_t att;
+        memcpy(&att, ubx_rx_msg.ubx_msg, sizeof(ubx_hnr_att_t));
+
+        this->attitude.timeOfWeek = att.iTOW;
+        this->attitude.roll = att.roll * 1e-5;
+        this->attitude.pitch = att.pitch * 1e-5;
+        this->attitude.heading = att.heading * 1e-5;
+        this->attitude.accRoll = att.accRoll * 1e-5;
+        this->attitude.accPitch = att.accPitch * 1e-5;
+        this->attitude.accHeading = att.accHeading * 1e-5;
+        /*
+        Log.info("==== UBX HNR ATT ====");
+        Log.info("iTOW: %d", att.iTOW);
+        Log.info("roll: %f", att.roll * 1e-5);
+        Log.info("pitch: %f", att.pitch * 1e-5);
+        Log.info("heading: %f", att.heading * 1e-5);
+        Log.info("accRoll: %f", att.accRoll * 1e-5);
+        Log.info("accPitch: %f", att.accPitch * 1e-5);
+        Log.info("accHeading: %f", att.accHeading * 1e-5);
+        */
+    } else if (ubx_rx_msg.msg_class == UBX_CLASS_ESF && ubx_rx_msg.msg_id == UBX_ESF_ALG) {
+        // FIXME: we should probably do the same thing for attitude: keep the whole message.
+        memcpy(&esf_alg, ubx_rx_msg.ubx_msg, sizeof(ubx_esf_alg_t));
+
+        /*
+        Log.info("==== UBX ESF ALG ====");
+        Log.info("iTOW: %d", esf_alg.iTOW);
+        Log.info("version: %d", esf_alg.version);
+        Log.info("flags: AutoAlignment: %d Status: %d", esf_alg.flags & 0x01, (esf_alg.flags >> 1)& 7);
+        Log.info("error: tiltAlgError: %d yawAlgError: %d angleError: %d", esf_alg.error & 0x01, (esf_alg.error >> 1) & 0x01, (esf_alg.error >> 2) & 0x01);
+        Log.info("error: %d", esf_alg.error);
+        Log.info("Yaw: %f", esf_alg.yaw * 1e-2);
+        Log.info("Pitch: %f", esf_alg.pitch * 1e-2);
+        Log.info("Roll: %f", esf_alg.roll * 1e-2);
+        */
     }
 }
 
@@ -1110,6 +1168,13 @@ bool ubloxGPS::getEsfStatus(ubx_esf_status_t &esf)
     LOCK();
     memcpy(&esf, &esf_status, sizeof(ubx_esf_status_t));
     return esf_status.valid;
+}
+
+bool ubloxGPS::getEsfAlignmentStatus(ubx_esf_alg_t &alg)
+{
+    LOCK();
+    memcpy(&alg, &esf_alg, sizeof(ubx_esf_alg_t));
+    return true;
 }
 
 bool ubloxGPS::getSatelliteInfo(ubx_nav_sat_t &sats) {
