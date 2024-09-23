@@ -24,6 +24,9 @@ const uint16_t UBX_LOG_STRING_MAX_LEN = 256;
 const size_t UBX_MGA_FLASH_DATA_MAX_LEN = 512;
 const size_t UBX_RX_CHANNELS = 72;
 
+const double UBX_HDOP_MAX = 100.0; // Maximum value for HDOP.  This also implies that the position is not fixed.
+const double UBX_HDOP_DEFAULT = 0.0; // Default HDOP value if not read from the module.
+
 typedef enum {
     UBX_CLASS_NAV      = 0x01,  // Navigation Results Messages: Position, Speed, Time, Acceleration, Heading, DOP, SVs used
     UBX_CLASS_RXM      = 0x02,  // Receiver Manager Messages: Satellite Status, RTC Status

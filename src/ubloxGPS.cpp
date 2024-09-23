@@ -274,7 +274,11 @@ void ubloxGPS::processLockStability()
         std_dev /= stabilityWindowLength;
         std_dev = sqrt(std_dev);
 
-        isStable = ((stabilityWindowLength == STABILITY_WINDOW_LENGTH) && (std_dev < (avg * STABILITY_WINDOW_THRESHOLD)));
+        auto hdop = getHDOP();
+        // A valid HDOP figure is below 100.0 (MAX) but above 0.0 (DEFAULT)
+        bool hdopValid = (UBX_HDOP_MAX > hdop) && (UBX_HDOP_DEFAULT < hdop);
+
+        isStable = (hdopValid && (stabilityWindowLength == STABILITY_WINDOW_LENGTH) && (std_dev < (avg * STABILITY_WINDOW_THRESHOLD)));
     } else if (ubloxGpsLockMethod::HorizontalDop == lockMethod) {
         isStable = (getHDOP() < (double)hdopStability);
     } else {
@@ -787,8 +791,8 @@ void ubloxGPS::processUBX()
         memcpy(nav_sat.bytes, ubx_rx_msg.ubx_msg, sizeof(ubx_nav_sat_t));
         Loglib.info("UBX_NAV_SAT: %u sats in view", nav_sat.regs.numSvs);
         for (auto sv : nav_sat.regs.sats) {
-            Loglib.trace("\tSatellite: {used: %c, num: %*u, snr: %*u, qualInd: %u, health: %u, ephAv: %c, almAv: %c, anoAv: %c, aopAv: %c}", 
-                sv.flags.fields.svUsed ? 'Y' : 'N', 3, sv.svID, 3, sv.cno, sv.flags.fields.qualityInd, sv.flags.fields.health, 
+            Loglib.trace("\tSatellite: {used: %c, num: %*u, snr: %*u, qualInd: %u, health: %u, ephAv: %c, almAv: %c, anoAv: %c, aopAv: %c}",
+                sv.flags.fields.svUsed ? 'Y' : 'N', 3, sv.svID, 3, sv.cno, sv.flags.fields.qualityInd, sv.flags.fields.health,
                 sv.flags.fields.ephAvail ? 'Y' : 'N', sv.flags.fields.almAvail ? 'Y' : 'N', sv.flags.fields.anoAvail ? 'Y' : 'N',
                 sv.flags.fields.aopAvail ? 'Y' : 'N');
         }
@@ -796,9 +800,9 @@ void ubloxGPS::processUBX()
         memcpy(nav_orb.bytes, ubx_rx_msg.ubx_msg, sizeof(ubx_nav_orb_t));
         Loglib.info("UBX_NAV_ORB: %u sats in almanac", nav_orb.regs.numSv);
         for (auto sv : nav_orb.regs.sats) {
-            Loglib.trace("\tOrbit: {num: %*u, health: %u, viz: %u, ephUse: %u, ephSrc: %u, almUse: %u, almSrc: %u, aopUse: %u, orbTyp: %u}", 
-                3, sv.svId, 
-                sv.svFlag.flags.health, sv.svFlag.flags.visibility, 
+            Loglib.trace("\tOrbit: {num: %*u, health: %u, viz: %u, ephUse: %u, ephSrc: %u, almUse: %u, almSrc: %u, aopUse: %u, orbTyp: %u}",
+                3, sv.svId,
+                sv.svFlag.flags.health, sv.svFlag.flags.visibility,
                 sv.eph.flags.ephUseability, sv.eph.flags.ephSource,
                 sv.alm.flags.almUsability, sv.alm.flags.almSource,
                 sv.otherOrb.flags.anoAopUsability, sv.otherOrb.flags.type);
@@ -857,7 +861,7 @@ void ubloxGPS::processUBX()
                 }
                 break;
             }
-            
+
             // System restored from backup message
             case 3: {
                 restoreStatus = (ubx_upd_sos_restore_resp_t)ubx_rx_msg.ubx_msg[4];
@@ -1299,11 +1303,11 @@ bool ubloxGPS::setUDREnable(bool useUDR)
     sentences[1] = (uint8_t)UBX_CFG_NAVX5;
     sentences[2] = 40;
     sentences[3] = 0x00;
-    
+
     // Payload
     sentences[4] = 0x02; // version LSB = 0x02
     sentences[5] = 0x00; // version MSB = 0x00
-    
+
     uint32_t mask2 = (1 << 6);  // Update ADR/UDR setting only
     sentences[8]  = (mask2 & 0xFF);         // mask2 LLSB
     sentences[9]  = ((mask2 >> 8) & 0xFF);  // mask2 LMSB
@@ -1313,7 +1317,7 @@ bool ubloxGPS::setUDREnable(bool useUDR)
     sentences[43] = useUDR ? 0x01 : 0x00; // useUdr
 
     // other item not apply, so keep 0
-    if(log_enabled) Loglib.info("set UDR Enable {useUDR: %s}", 
+    if(log_enabled) Loglib.info("set UDR Enable {useUDR: %s}",
         useUDR ? "true" : "false");
     return requestSendUBX(sentences, sentences[2] + 4);
 }
@@ -1326,7 +1330,7 @@ bool ubloxGPS::setIMUAutoAlignment(bool enable)
     sentences[1] = (uint8_t)UBX_CFG_ESFALG;
     sentences[2] = 12;
     sentences[3] = 0x00;
-    
+
     // uint32_t bitfield
     sentences[4] = 0x00; // bit7 - version (0x0)
     sentences[5] = enable ? 0x01: 0x00; // bit8 - 0=use manual mount angles, 1=use automatic calibration
@@ -1351,7 +1355,7 @@ bool ubloxGPS::setIMUAlignmentAngles(double yaw_angle_deg, double pitch_angle_de
     sentences[1] = (uint8_t)UBX_CFG_ESFALG;
     sentences[2] = 12;
     sentences[3] = 0x00;
-    
+
     // uint32_t bitfield
     sentences[4] = 0x00; // bit7 - version (0x0)
     sentences[5] = 0x00; // bit8 - 0=use manual mount angles, 1=use automatic calibration
@@ -1393,7 +1397,7 @@ bool ubloxGPS::setIMUtoVRP(int16_t x, int16_t y, int16_t z)
     sentences[1] = (uint8_t)UBX_CFG_ESFLA;
     sentences[2] = 12;  // 4 + 8*numConfigs (which is 1 in this case)
     sentences[3] = 0x00;
-    
+
     // uint32_t bitfield
     sentences[4] = 0x00; // message version (0x0)
     sentences[5] = 0x01; // numConfigs (1)
@@ -1422,11 +1426,11 @@ bool ubloxGPS::setAOPSettings(bool useAop, uint16_t aopOrbMaxErr)
     sentences[1] = (uint8_t)UBX_CFG_NAVX5;
     sentences[2] = 44;
     sentences[3] = 0x00;
-    
+
     // Payload
     sentences[4] = 0x03; // version LSB = 0x02
     sentences[5] = 0x00; // version MSB = 0x00
-    
+
     uint16_t mask1 = (1 << 14); // Update assist now settings (aopCfg, aopOrbMaxErr) only
     sentences[6] = (mask1 & 0xFF);          // mask1 LSB
     sentences[7] = ((mask1 >> 8) & 0xFF);   // mask1 MSB
@@ -1442,8 +1446,8 @@ bool ubloxGPS::setAOPSettings(bool useAop, uint16_t aopOrbMaxErr)
     } // else '0' means use FW default (100)
 
     // other item not apply, so keep 0
-    if(log_enabled) Loglib.info("set AOP Settings {aopCfg: %s, aopOrbMaxErr: %u}", 
-        useAop ? "true" : "false", 
+    if(log_enabled) Loglib.info("set AOP Settings {aopCfg: %s, aopOrbMaxErr: %u}",
+        useAop ? "true" : "false",
         aopOrbMaxErr);
     return requestSendUBX(sentences, sentences[2] + 4);
 }
@@ -1461,7 +1465,7 @@ bool ubloxGPS::setConfigClearSaveLoad(uint32_t clear, uint32_t save, uint32_t lo
     sentences[1] = (uint8_t)UBX_CFG_CFG;
     sentences[2] = 12;
     sentences[3] = 0x00;
-    
+
     // Payload, all uint32_t's
     *(uint32_t*)(&sentences[4])  = clear;
     *(uint32_t*)(&sentences[8])  =  save;
@@ -1479,7 +1483,7 @@ bool ubloxGPS::setReset(ubx_reset_nav_bbr_mask_t navBbrMask, ubx_reset_mode_t re
     sentences[1] = (uint8_t)UBX_CFG_RST;
     sentences[2] = 8;
     sentences[3] = 0x00;
-    
+
     // Payload
     sentences[4] = (uint8_t)(navBbrMask & 0xFF);
     sentences[5] = (uint8_t)((navBbrMask >> 8) & 0xFF);
@@ -1518,7 +1522,7 @@ bool ubloxGPS::saveOnShutdown(void)
         Loglib.warn("createBackup() FAILED!");
         return false;
     }
-    
+
     // saveOnShutdown boolean will be set when UBX_UPD_SOS message is received!
     long unsigned int start = millis();
     while (!saveOnShutdownACK) {
